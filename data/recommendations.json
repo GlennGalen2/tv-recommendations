@@ -1,0 +1,30 @@
+[
+  {
+    "id": "night-manager",
+    "title": "The Night Manager",
+    "service": "Prime / AMC+",
+    "score": 94,
+    "reason": "Strong espionage atmosphere, capable adults, moral stakes, and serious dialogue. Less exaggerated than many spy thrillers."
+  },
+  {
+    "id": "unforgotten",
+    "title": "Unforgotten",
+    "service": "PBS / Prime",
+    "score": 93,
+    "reason": "Patient mystery construction, accumulated evidence, strong character work, and emotionally credible consequences."
+  },
+  {
+    "id": "tehran",
+    "title": "Tehran",
+    "service": "Apple TV+",
+    "score": 89,
+    "reason": "Espionage, divided loyalties, evolving information, and competent characters under pressure."
+  },
+  {
+    "id": "babylon-berlin",
+    "title": "Babylon Berlin",
+    "service": "Check availability",
+    "score": 87,
+    "reason": "Complex historical mystery, political intrigue, strong atmosphere, and an unusually rich fictional world."
+  }
+]
