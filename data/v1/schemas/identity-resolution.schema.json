@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/tvapp/v1/identity-resolution.schema.json",
+  "title": "Private metadata enrichment and identity resolution",
+  "type": "object",
+  "required": ["id", "schemaVersion", "sourceTitleId", "status", "confidence", "resolutionMethod", "recordedAt"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^resolution_[A-Za-z0-9_-]+$" },
+    "schemaVersion": { "const": 1 },
+    "sourceTitleId": { "type": "string" },
+    "status": { "enum": ["unresolved", "candidate-match", "confidently-resolved", "manually-confirmed", "manually-rejected"] },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "resolutionMethod": { "type": "string" },
+    "recordedAt": { "type": "string", "format": "date-time" },
+    "supersedesResolutionId": { "type": ["string", "null"] },
+    "candidate": {
+      "type": ["object", "null"],
+      "properties": {
+        "provider": { "type": "string" },
+        "externalId": { "type": "string" },
+        "mediaType": { "enum": ["movie", "series", "season", "episode", "special"] },
+        "canonicalTitle": { "type": "string" },
+        "releaseDate": { "type": "string" },
+        "releaseYear": { "type": "integer" },
+        "series": { "type": "object" },
+        "seasonNumber": { "type": "integer", "minimum": 0 },
+        "episodeNumber": { "type": "integer", "minimum": 0 },
+        "episodeTitle": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "rationale": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": true
+}

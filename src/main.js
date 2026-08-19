@@ -16,6 +16,7 @@ import { createAmazonPrimeImportPanel } from './ui/amazonPrimeImportPanel.js'
 import { createPrivateBackupPanel } from './ui/privateBackupPanel.js'
 import { createViewingAnalysisPanel } from './ui/viewingAnalysisPanel.js'
 import { createImportBatchMaintenancePanel } from './ui/importBatchMaintenancePanel.js'
+import { createIdentityResolutionPanel } from './ui/identityResolutionPanel.js'
 
 const titlesById = new Map(
   catalog.titles.map(title => [title.id, title])
@@ -51,6 +52,7 @@ const importBatchMaintenancePanel = createImportBatchMaintenancePanel({
   requestRender: render,
   onRemovalComplete: refreshPrivateDataViews
 })
+const identityResolutionPanel = createIdentityResolutionPanel({ requestRender: render })
 
 const shows = recommendationData.recommendations.map(recommendation => {
   const title = titlesById.get(recommendation.titleId)
@@ -150,7 +152,8 @@ async function refreshPrivateDataViews() {
   await Promise.all([
     refreshPrivateDemoState(),
     viewingAnalysisPanel.refresh(),
-    importBatchMaintenancePanel.refresh()
+    importBatchMaintenancePanel.refresh(),
+    identityResolutionPanel.refresh()
   ])
 }
 
@@ -437,6 +440,8 @@ function render() {
 
       ${importBatchMaintenancePanel.render(privateDemoState.status === 'ready')}
 
+      ${identityResolutionPanel.render(privateDemoState.status === 'ready')}
+
       <section class="recent-section">
 
         <div class="section-heading">
@@ -477,6 +482,7 @@ function render() {
   privateBackupPanel.bind(privateDemoState.status === 'ready')
   viewingAnalysisPanel.bind(privateDemoState.status === 'ready')
   importBatchMaintenancePanel.bind(privateDemoState.status === 'ready')
+  identityResolutionPanel.bind(privateDemoState.status === 'ready')
 }
 
 render()

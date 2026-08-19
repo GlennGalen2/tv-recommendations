@@ -1,10 +1,10 @@
 import { deriveViewingAnalysis } from './viewingAnalysis.js'
 
 const DATABASE_NAME = 'tv-recommendations-private'
-const DATABASE_VERSION = 1
+const DATABASE_VERSION = 2
 const RECORD_SCHEMA_VERSION = 1
 export const PRIVATE_BACKUP_FORMAT = 'tv-recommendations-private-backup'
-export const PRIVATE_BACKUP_FORMAT_VERSION = 1
+export const PRIVATE_BACKUP_FORMAT_VERSION = 2
 
 export const PRIVATE_STORES = Object.freeze({
   metadata: 'metadata',
@@ -15,7 +15,8 @@ export const PRIVATE_STORES = Object.freeze({
   historyEvents: 'historyEvents',
   reactions: 'reactions',
   preferenceEvidence: 'preferenceEvidence',
-  recommendations: 'recommendations'
+  recommendations: 'recommendations',
+  identityResolutions: 'identityResolutions'
 })
 
 const RECORD_STORES = new Set([
@@ -26,7 +27,8 @@ const RECORD_STORES = new Set([
   PRIVATE_STORES.historyEvents,
   PRIVATE_STORES.reactions,
   PRIVATE_STORES.preferenceEvidence,
-  PRIVATE_STORES.recommendations
+  PRIVATE_STORES.recommendations,
+  PRIVATE_STORES.identityResolutions
 ])
 
 const BACKUP_STORES = Object.freeze(Object.values(PRIVATE_STORES))
@@ -34,7 +36,8 @@ const PRIVATE_STORE_NAMES = new Set(BACKUP_STORES)
 
 const IMMUTABLE_STORES = new Set([
   PRIVATE_STORES.historyEvents,
-  PRIVATE_STORES.reactions
+  PRIVATE_STORES.reactions,
+  PRIVATE_STORES.identityResolutions
 ])
 
 const REACTION_VALUES = new Set([
@@ -166,6 +169,11 @@ function createObjectStores(database, upgradeTransaction) {
     { name: 'by-target', keyPath: 'target.id' },
     { name: 'by-generated-at', keyPath: 'generatedAt' }
   ])
+  createStore(database, upgradeTransaction, PRIVATE_STORES.identityResolutions, { keyPath: 'id' }, [
+    { name: 'by-source-title', keyPath: 'sourceTitleId' },
+    { name: 'by-status', keyPath: 'status' },
+    { name: 'by-recorded-at', keyPath: 'recordedAt' }
+  ])
 }
 
 export function isPrivateStoreSupported() {
@@ -280,6 +288,121 @@ export async function getPrivateViewingAnalysis() {
   return deriveViewingAnalysis({ events, titles, sources })
 }
 
+const IDENTITY_RESOLUTION_STATUSES = new Set([
+  'unresolved',
+  'candidate-match',
+  'confidently-resolved',
+  'manually-confirmed',
+  'manually-rejected'
+])
+
+function requireIdentityResolution(record) {
+  if (typeof record.sourceTitleId !== 'string' || !record.sourceTitleId.trim()) {
+    throw new TypeError('Identity resolutions require a sourceTitleId.')
+  }
+  if (!IDENTITY_RESOLUTION_STATUSES.has(record.status)) {
+    throw new TypeError('Identity resolutions require a supported status.')
+  }
+  if (!Number.isFinite(record.confidence) || record.confidence < 0 || record.confidence > 1) {
+    throw new TypeError('Identity resolutions require confidence from 0 through 1.')
+  }
+  if (typeof record.resolutionMethod !== 'string' || !record.resolutionMethod.trim()) {
+    throw new TypeError('Identity resolutions require a resolutionMethod.')
+  }
+  if (typeof record.recordedAt !== 'string' || Number.isNaN(Date.parse(record.recordedAt))) {
+    throw new TypeError('Identity resolutions require a recordedAt timestamp.')
+  }
+  if (record.status !== 'unresolved') {
+    const candidate = record.candidate
+    if (!candidate || typeof candidate.provider !== 'string' || typeof candidate.externalId !== 'string'
+      || typeof candidate.mediaType !== 'string' || typeof candidate.canonicalTitle !== 'string') {
+      throw new TypeError('Resolved identity records require a provider candidate with stable identity.')
+    }
+  }
+}
+
+export async function createIdentityResolution(record, { database: providedDatabase } = {}) {
+  requireRecord(record, PRIVATE_STORES.identityResolutions)
+  requireIdentityResolution(record)
+  const database = providedDatabase || await openPrivateStore()
+  if (record.supersedesResolutionId) {
+    const transaction = database.transaction(PRIVATE_STORES.identityResolutions, 'readonly')
+    const previous = await requestAsPromise(
+      transaction.objectStore(PRIVATE_STORES.identityResolutions).get(record.supersedesResolutionId)
+    )
+    await transactionAsPromise(transaction)
+    if (!previous || previous.sourceTitleId !== record.sourceTitleId) {
+      throw new Error('An identity resolution can only supersede the same source title.')
+    }
+  }
+  const transaction = database.transaction(PRIVATE_STORES.identityResolutions, 'readwrite')
+  transaction.objectStore(PRIVATE_STORES.identityResolutions).add(record)
+  await transactionAsPromise(transaction)
+  return record.id
+}
+
+function latestResolutionsByTitle(records) {
+  const superseded = new Set(records.map(record => record.supersedesResolutionId).filter(Boolean))
+  const latest = records.filter(record => !superseded.has(record.id))
+  return new Map(latest.map(record => [record.sourceTitleId, record]))
+}
+
+export async function getPrivateIdentityResolutionReview() {
+  const [titles, resolutions] = await Promise.all([
+    listPrivateRecords(PRIVATE_STORES.titles),
+    listPrivateRecords(PRIVATE_STORES.identityResolutions)
+  ])
+  const latest = latestResolutionsByTitle(resolutions)
+  const counts = {
+    unresolved: 0,
+    candidateMatch: 0,
+    confidentlyResolved: 0,
+    manuallyConfirmed: 0,
+    manuallyRejected: 0
+  }
+
+  for (const title of titles) {
+    const status = latest.get(title.id)?.status || (title.type === 'unknown' ? 'unresolved' : null)
+    if (!status) continue
+    const countKey = {
+      unresolved: 'unresolved',
+      'candidate-match': 'candidateMatch',
+      'confidently-resolved': 'confidentlyResolved',
+      'manually-confirmed': 'manuallyConfirmed',
+      'manually-rejected': 'manuallyRejected'
+    }[status]
+    counts[countKey] += 1
+  }
+
+  return {
+    counts,
+    resolutions: [...latest.values()].sort((left, right) => right.recordedAt.localeCompare(left.recordedAt)),
+    syntheticDemo: latest.get('synthetic:identity-resolution-demo') || null
+  }
+}
+
+export async function undoIdentityResolution(resolutionId, { database: providedDatabase } = {}) {
+  const database = providedDatabase || await openPrivateStore()
+  const transaction = database.transaction(PRIVATE_STORES.identityResolutions, 'readonly')
+  const previous = await requestAsPromise(
+    transaction.objectStore(PRIVATE_STORES.identityResolutions).get(resolutionId)
+  )
+  await transactionAsPromise(transaction)
+  if (!previous) throw new Error('The identity resolution no longer exists.')
+  return createIdentityResolution({
+    id: `resolution_undo_${globalThis.crypto?.randomUUID?.() || Date.now().toString(36)}`,
+    schemaVersion: RECORD_SCHEMA_VERSION,
+    sourceTitleId: previous.sourceTitleId,
+    status: 'unresolved',
+    candidate: null,
+    confidence: 0,
+    resolutionMethod: 'manual-undo',
+    rationale: ['Prior resolution explicitly undone.'],
+    recordedAt: new Date().toISOString(),
+    supersedesResolutionId: previous.id
+  }, { database })
+}
+
 function recordReferencesTitle(record, titleId, seen = new Set()) {
   if (record === titleId) return true
   if (!record || typeof record !== 'object') return false
@@ -316,6 +439,7 @@ export async function removePrivateImportBatch(batchId, { database: providedData
     PRIVATE_STORES.reactions,
     PRIVATE_STORES.preferenceEvidence,
     PRIVATE_STORES.recommendations,
+    PRIVATE_STORES.identityResolutions,
     PRIVATE_STORES.metadata,
     PRIVATE_STORES.viewers,
     PRIVATE_STORES.sources
@@ -331,12 +455,13 @@ export async function removePrivateImportBatch(batchId, { database: providedData
     throw new Error('The selected import batch no longer exists.')
   }
 
-  const [allBatches, allEvents, allReactions, allEvidence, allRecommendations, allMetadata, allViewers, allSources] = await Promise.all([
+  const [allBatches, allEvents, allReactions, allEvidence, allRecommendations, allIdentityResolutions, allMetadata, allViewers, allSources] = await Promise.all([
     requestAsPromise(batches.getAll()),
     requestAsPromise(historyEvents.getAll()),
     requestAsPromise(transaction.objectStore(PRIVATE_STORES.reactions).getAll()),
     requestAsPromise(transaction.objectStore(PRIVATE_STORES.preferenceEvidence).getAll()),
     requestAsPromise(transaction.objectStore(PRIVATE_STORES.recommendations).getAll()),
+    requestAsPromise(transaction.objectStore(PRIVATE_STORES.identityResolutions).getAll()),
     requestAsPromise(transaction.objectStore(PRIVATE_STORES.metadata).getAll()),
     requestAsPromise(transaction.objectStore(PRIVATE_STORES.viewers).getAll()),
     requestAsPromise(transaction.objectStore(PRIVATE_STORES.sources).getAll())
@@ -350,6 +475,7 @@ export async function removePrivateImportBatch(batchId, { database: providedData
     ...allReactions,
     ...allEvidence,
     ...allRecommendations,
+    ...allIdentityResolutions,
     ...allMetadata,
     ...allViewers,
     ...allSources
@@ -580,6 +706,14 @@ function validateBackupRecords(records) {
   }
 }
 
+function normalizedBackupRecords(backup) {
+  const records = structuredClone(backup.records)
+  if (backup.formatVersion === 1 && !Array.isArray(records[PRIVATE_STORES.identityResolutions])) {
+    records[PRIVATE_STORES.identityResolutions] = []
+  }
+  return records
+}
+
 function backupCounts(records) {
   return Object.fromEntries(
     BACKUP_STORES.map(storeName => [storeName, records[storeName].length])
@@ -609,10 +743,10 @@ export function validatePrivateBackup(backup) {
     if (backup.format !== PRIVATE_BACKUP_FORMAT) {
       problems.push('Backup format marker is not recognized.')
     }
-    if (backup.formatVersion !== PRIVATE_BACKUP_FORMAT_VERSION) {
+    if (![1, PRIVATE_BACKUP_FORMAT_VERSION].includes(backup.formatVersion)) {
       problems.push('Backup format version is incompatible.')
     }
-    if (backup.databaseVersion !== DATABASE_VERSION) {
+    if (![1, DATABASE_VERSION].includes(backup.databaseVersion)) {
       problems.push('Backup database schema version is incompatible.')
     }
     if (backup.recordSchemaVersion !== RECORD_SCHEMA_VERSION) {
@@ -623,11 +757,13 @@ export function validatePrivateBackup(backup) {
     }
 
     try {
-      validateBackupRecords(backup.records)
-      const expectedCounts = backupCounts(backup.records)
+      const records = normalizedBackupRecords(backup)
+      validateBackupRecords(records)
+      const expectedCounts = backupCounts(records)
       if (!backup.recordCounts || typeof backup.recordCounts !== 'object') {
         problems.push('Backup record counts are missing.')
-      } else if (BACKUP_STORES.some(storeName => backup.recordCounts[storeName] !== expectedCounts[storeName])) {
+      } else if (Object.entries(backup.recordCounts).some(([storeName, count]) => expectedCounts[storeName] !== count)
+        || (backup.formatVersion !== 1 && BACKUP_STORES.some(storeName => backup.recordCounts[storeName] !== expectedCounts[storeName]))) {
         problems.push('Backup record counts do not match its records.')
       }
     } catch {
@@ -675,6 +811,7 @@ export async function restorePrivateBackup(backup, { database: providedDatabase 
     throw new Error('Private backup validation failed; current data was not changed.')
   }
 
+  const records = normalizedBackupRecords(backup)
   const database = providedDatabase || await openPrivateStore()
   const transaction = database.transaction(BACKUP_STORES, 'readwrite')
   const completion = transactionAsPromise(transaction)
@@ -685,7 +822,7 @@ export async function restorePrivateBackup(backup, { database: providedDatabase 
 
   for (const storeName of BACKUP_STORES) {
     const store = transaction.objectStore(storeName)
-    for (const record of backup.records[storeName]) {
+    for (const record of records[storeName]) {
       store.add(record)
     }
   }
@@ -694,6 +831,6 @@ export async function restorePrivateBackup(backup, { database: providedDatabase 
 
   return {
     restoredAt: new Date().toISOString(),
-    recordCounts: backupCounts(backup.records)
+    recordCounts: backupCounts(records)
   }
 }

@@ -95,8 +95,25 @@ assert.deepEqual(inspectPrivateBackupJson(JSON.stringify(malformed)).validation.
 assert.throws(() => parsePrivateBackupJson('{bad json'), /not valid JSON/)
 assert.throws(() => parsePrivateBackupJson(JSON.stringify(malformed)), /not a compatible/)
 
-const incompatible = { ...backup, formatVersion: 2 }
+const incompatible = { ...backup, formatVersion: 3 }
 assert.equal(validatePrivateBackup(incompatible).valid, false)
+
+const versionOneRecords = structuredClone(backup.records)
+delete versionOneRecords.identityResolutions
+const versionOneCounts = { ...backup.recordCounts }
+delete versionOneCounts.identityResolutions
+const compatibleVersionOne = {
+  ...backup,
+  formatVersion: 1,
+  databaseVersion: 1,
+  recordCounts: versionOneCounts,
+  records: versionOneRecords
+}
+assert.equal(validatePrivateBackup(compatibleVersionOne).valid, true)
+const versionOneDatabase = createMemoryDatabase(Object.fromEntries(storeNames.map(name => [name, []])))
+await restorePrivateBackup(compatibleVersionOne, { database: versionOneDatabase })
+assert.deepEqual(versionOneDatabase.snapshot().identityResolutions, [])
+assert.equal(versionOneDatabase.snapshot().historyEvents[0].id, 'evt_synthetic')
 
 const beforeFailedRestore = database.snapshot()
 const failedDatabase = createMemoryDatabase(beforeFailedRestore, PRIVATE_STORES.historyEvents)

@@ -40,6 +40,42 @@ add authoritative external IDs (for example TMDb, IMDb, TVDB, or provider
 catalog IDs), release year, media type, season/episode numbers, and original
 language to resolve those references safely.
 
+## Private metadata enrichment and identity resolution
+
+`identityResolutions` is a private, append-only IndexedDB store separate from
+playback events and source-title records. A resolution references a `sourceTitleId`
+and records one of `unresolved`, `candidate-match`, `confidently-resolved`,
+`manually-confirmed`, or `manually-rejected`, plus provider, provider ID, media
+type, canonical title, optional release/series/season/episode details,
+confidence, method, timestamp, rationale, and `supersedesResolutionId` when it
+corrects an earlier decision. This leaves imported events immutable and makes
+every correction reversible by appending an explicit `unresolved` undo record.
+
+Provider adapters will later turn a source-title record and its known episode
+structure into a provider-independent query and candidate list. Until a
+provider is deliberately connected, the UI uses a clearly labelled synthetic
+candidate only; it neither looks up nor resolves imported titles.
+
+For a private, non-commercial app, TMDb is the recommended first adapter: it
+has both movie and TV coverage and stable IDs; its non-commercial API is free
+with required attribution. TMDb says to respect `429` responses and describes
+an approximate upper limit near 40 requests/second. TVmaze is a useful
+TV-only supplement with strong episode/season endpoints, but it does not cover
+movies and documents at least 20 calls per 10 seconds per IP. OMDb can search
+movies, series, and episodes through an IMDb-ID-oriented API, but has a more
+limited metadata model and requires an API key; the official IMDb API itself
+uses AWS Data Exchange credentials and subscription approval. Any future
+browser-only adapter must treat an API key as exposed to the browser; a key
+must be personally scoped and rate-limited, or a future private backend would
+be needed. No provider key or network integration exists today.
+
+Proposed automation policy (not enabled): automatically accept only a score of
+at least `0.995` when normalized title, known type, and a second independent
+identifier agree (release year or fully matching series/season/episode
+structure), with no competing candidate. Scores from `0.85` through `0.994`
+remain review-required; lower scores stay unresolved. Title-text similarity by
+itself never crosses either threshold.
+
 ## Authority and evidence flow
 
 1. `catalog/` supplies stable canonical title identities.
