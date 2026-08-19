@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "validate:data": "node scripts/validate-data.js"
+    "validate:data": "node scripts/validate-data.js",
+    "validate:private-store": "node --check src/data/privateStore.js"
   },
   "devDependencies": {
     "vite": "^8.2.0",

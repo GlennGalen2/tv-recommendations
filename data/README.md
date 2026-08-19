@@ -10,6 +10,21 @@ exports must remain outside this repository and outside the deployed app. A raw
 export may be normalized by a future local importer, but the export itself must
 not be copied beneath `data/` or `public/`.
 
+## Private browser-local data
+
+`src/data/privateStore.js` defines the separate IndexedDB store used for real
+user data. It contains no seeded records and is not a static data asset. The
+private store keeps titles, viewers, source and import provenance, history,
+append-only reactions, inferred evidence, and recommendations in distinct
+object stores. Raw exports are not retained in import batches; those records
+keep provenance such as source service, date, filename, and hash instead.
+
+The module exposes small create, read, update, reaction-supersession, and
+backup-export operations. Its backup export returns an in-memory structured
+snapshot for a future user-directed backup or sync feature; it does not upload
+anything. Database upgrades create stores idempotently and close stale browser
+connections on version changes.
+
 ## Authority and evidence flow
 
 1. `catalog/` supplies stable canonical title identities.
