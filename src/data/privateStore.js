@@ -1,4 +1,5 @@
 import { deriveViewingAnalysis } from './viewingAnalysis.js'
+import { derivePrivatePreferenceAnalysis } from './privatePreferences.js'
 
 const DATABASE_NAME = 'tv-recommendations-private'
 const DATABASE_VERSION = 2
@@ -101,6 +102,16 @@ function requireReaction(record) {
 
   if (typeof record.viewerId !== 'string' || typeof record.titleId !== 'string') {
     throw new TypeError('Reaction records require viewerId and titleId.')
+  }
+  if (record.strength !== undefined && (!Number.isFinite(record.strength) || record.strength < 0 || record.strength > 1)) {
+    throw new TypeError('Reaction strength must be from 0 through 1.')
+  }
+  if (record.mechanisms !== undefined) {
+    for (const direction of ['positive', 'negative']) {
+      if (!Array.isArray(record.mechanisms?.[direction]) || record.mechanisms[direction].some(value => typeof value !== 'string' || !value.trim())) {
+        throw new TypeError('Reaction mechanisms require positive and negative string arrays.')
+      }
+    }
   }
 }
 
@@ -287,6 +298,16 @@ export async function getPrivateViewingAnalysis() {
   ])
 
   return deriveViewingAnalysis({ events, titles, sources, resolutions })
+}
+
+export async function getPrivatePreferenceAnalysis() {
+  const [reactions, events, titles, resolutions] = await Promise.all([
+    listPrivateRecords(PRIVATE_STORES.reactions),
+    listPrivateRecords(PRIVATE_STORES.historyEvents),
+    listPrivateRecords(PRIVATE_STORES.titles),
+    listPrivateRecords(PRIVATE_STORES.identityResolutions)
+  ])
+  return derivePrivatePreferenceAnalysis({ reactions, events, titles, resolutions })
 }
 
 const IDENTITY_RESOLUTION_STATUSES = new Set([
@@ -650,6 +671,29 @@ export async function supersedeReaction(reaction) {
   }
 
   return createReaction(reaction)
+}
+
+export async function commitExplicitPreferenceImport(reactions) {
+  if (!Array.isArray(reactions) || !reactions.length) throw new TypeError('At least one explicit reaction is required.')
+  for (const reaction of reactions) {
+    requireRecord(reaction, PRIVATE_STORES.reactions)
+    requireReaction(reaction)
+  }
+  const database = await openPrivateStore()
+  const transaction = database.transaction(PRIVATE_STORES.reactions, 'readwrite')
+  const store = transaction.objectStore(PRIVATE_STORES.reactions)
+  const existing = await requestAsPromise(store.getAll())
+  const existingIds = new Set(existing.map(reaction => reaction.id))
+  let imported = 0
+  let skipped = 0
+  for (const reaction of reactions) {
+    if (existingIds.has(reaction.id)) { skipped += 1; continue }
+    store.add(reaction)
+    existingIds.add(reaction.id)
+    imported += 1
+  }
+  await transactionAsPromise(transaction)
+  return { imported, skipped }
 }
 
 export async function exportPrivateBackup() {
