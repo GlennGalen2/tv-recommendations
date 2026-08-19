@@ -279,13 +279,14 @@ export async function listPrivateRecords(storeName, options = {}) {
 }
 
 export async function getPrivateViewingAnalysis() {
-  const [events, titles, sources] = await Promise.all([
+  const [events, titles, sources, resolutions] = await Promise.all([
     listPrivateRecords(PRIVATE_STORES.historyEvents),
     listPrivateRecords(PRIVATE_STORES.titles),
-    listPrivateRecords(PRIVATE_STORES.sources)
+    listPrivateRecords(PRIVATE_STORES.sources),
+    listPrivateRecords(PRIVATE_STORES.identityResolutions)
   ])
 
-  return deriveViewingAnalysis({ events, titles, sources })
+  return deriveViewingAnalysis({ events, titles, sources, resolutions })
 }
 
 const IDENTITY_RESOLUTION_STATUSES = new Set([

@@ -3,19 +3,12 @@ import {
   getPrivateIdentityResolutionReview,
   undoIdentityResolution
 } from '../data/privateStore.js'
-import { runTmdbMatchingEvaluation } from '../data/tmdbMatchingPilot.js'
-
-const SYNTHETIC_SOURCE_TITLE_ID = 'synthetic:identity-resolution-demo'
-const SYNTHETIC_CANDIDATE = {
-  provider: 'synthetic-provider',
-  externalId: 'synthetic-series-101',
-  mediaType: 'series',
-  canonicalTitle: 'Synthetic Orbit Station',
-  releaseYear: 2024,
-  series: { provider: 'synthetic-provider', externalId: 'synthetic-series-101', canonicalTitle: 'Synthetic Orbit Station' },
-  confidence: 0.96,
-  reasons: ['Synthetic provider result for UI review only.']
-}
+import {
+  filterAndSortIdentityReviewQueue,
+  paginateIdentityReviewQueue,
+  runTmdbIdentityReviewQueue,
+  summarizeIdentityReviewQueue
+} from '../data/tmdbMatchingPilot.js'
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, character => ({
@@ -23,180 +16,156 @@ function escapeHtml(value) {
   })[character])
 }
 
-export function createIdentityResolutionPanel({ requestRender }) {
-  let state = { status: 'loading', review: null, error: null }
+function newResolutionId() {
+  return `resolution_${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`
+}
+
+function categoryLabel(category) {
+  return {
+    'needs-review': 'Needs review',
+    unresolved: 'Unresolved / no adequate candidate',
+    confirmed: 'Confirmed',
+    rejected: 'Rejected',
+    'previously-resolved': 'Previously resolved'
+  }[category] || category
+}
+
+export function createIdentityResolutionPanel({ requestRender, onIdentityResolutionChanged = () => {} }) {
+  let state = { status: 'loading', review: null, queue: null, filter: 'needs-review', sort: 'priority', page: 0, error: null, progress: null }
 
   async function refresh() {
     state = { ...state, status: 'loading', error: null }
     requestRender()
     try {
-      state = { status: 'ready', review: await getPrivateIdentityResolutionReview(), error: null }
+      state = { ...state, status: 'ready', review: await getPrivateIdentityResolutionReview(), error: null }
     } catch {
-      state = { status: 'error', review: null, error: 'Private identity-resolution data is unavailable in this browser.' }
+      state = { ...state, status: 'error', review: null, error: 'Private identity-resolution data is unavailable in this browser.' }
     }
     requestRender()
   }
 
-  async function recordSyntheticDecision(status) {
+  async function runQueue(retryRemaining = false) {
+    const pendingTitleIds = retryRemaining ? state.queue?.pendingTitleIds : null
+    state = { ...state, status: 'running-queue', error: null, progress: { processed: 0, total: pendingTitleIds?.length || 0 } }
+    requestRender()
     try {
-      await createIdentityResolution({
-        id: `resolution_${crypto.randomUUID()}`,
-        schemaVersion: 1,
-        sourceTitleId: SYNTHETIC_SOURCE_TITLE_ID,
-        status,
-        candidate: SYNTHETIC_CANDIDATE,
-        confidence: SYNTHETIC_CANDIDATE.confidence,
-        resolutionMethod: status === 'manually-confirmed' ? 'manual-confirmation' : 'manual-rejection',
-        rationale: SYNTHETIC_CANDIDATE.reasons,
-        recordedAt: new Date().toISOString(),
-        supersedesResolutionId: state.review?.syntheticDemo?.id || null
+      const queue = await runTmdbIdentityReviewQueue({
+        eligibleTitleIds: pendingTitleIds,
+        previousItems: retryRemaining ? state.queue?.items || [] : [],
+        onProgress: async progress => {
+          state = { ...state, progress }
+          requestRender()
+        }
       })
-      await refresh()
+      state = { ...state, status: 'ready', queue, filter: 'needs-review', page: 0, progress: null }
     } catch {
-      state = { ...state, error: 'The synthetic review decision could not be saved.' }
+      state = { ...state, status: 'ready', error: 'The matching queue could not complete. No private title or resolution was changed.', progress: null }
+    }
+    requestRender()
+  }
+
+  async function recordDecision(item, candidate, status) {
+    if (!item || !candidate) return
+    try {
+      const resolutionId = await createIdentityResolution({
+        id: newResolutionId(), schemaVersion: 1, sourceTitleId: item.titleId, status,
+        candidate, confidence: candidate.score ?? 0,
+        resolutionMethod: status === 'manually-confirmed' ? 'manual-confirmation' : 'manual-rejection',
+        rationale: candidate.reasons || ['Explicit private review decision.'],
+        recordedAt: new Date().toISOString(), supersedesResolutionId: item.resolution?.id || null
+      })
+      const category = status === 'manually-confirmed' ? 'confirmed' : 'rejected'
+      if (state.queue) {
+        const items = state.queue.items.map(queueItem => queueItem.titleId === item.titleId ? { ...queueItem, category, state: category, resolution: { id: resolutionId, status, candidate } } : queueItem)
+        state = { ...state, queue: { ...state.queue, items, counts: summarizeIdentityReviewQueue(items) } }
+      }
+      await refresh()
+      await onIdentityResolutionChanged()
+    } catch {
+      state = { ...state, error: 'The explicit identity decision could not be saved.' }
       requestRender()
     }
   }
 
-  async function undoSyntheticDecision() {
+  async function undoDecision(item) {
+    if (!item?.resolution?.id) return
     try {
-      await undoIdentityResolution(state.review?.syntheticDemo?.id)
+      await undoIdentityResolution(item.resolution.id)
+      if (state.queue) {
+        const items = state.queue.items.map(queueItem => queueItem.titleId === item.titleId ? { ...queueItem, category: 'unresolved', state: 'unresolved', resolution: null, bestCandidate: null } : queueItem)
+        state = { ...state, queue: { ...state.queue, items, counts: summarizeIdentityReviewQueue(items) } }
+      }
       await refresh()
+      await onIdentityResolutionChanged()
     } catch {
-      state = { ...state, error: 'The synthetic review decision could not be undone.' }
+      state = { ...state, error: 'The prior identity decision could not be undone.' }
       requestRender()
     }
   }
 
-  async function runEvaluation(limit) {
-    state = { ...state, status: 'running-evaluation', error: null, evaluation: null, evaluationFilter: 'all', evaluationPage: 0 }
-    requestRender()
-    try {
-      const evaluation = await runTmdbMatchingEvaluation(limit)
-      state = { ...state, status: 'ready', evaluation, evaluationFilter: 'all', evaluationPage: 0 }
-    } catch {
-      state = { ...state, status: 'ready', error: 'The TMDb evaluation could not complete. No private data or resolutions were changed.', evaluation: null, evaluationFilter: 'all', evaluationPage: 0 }
-    }
-    requestRender()
-  }
+  function setFilter(filter) { state = { ...state, filter, page: 0 }; requestRender() }
+  function setSort(sort) { state = { ...state, sort, page: 0 }; requestRender() }
+  function setPage(page) { state = { ...state, page }; requestRender() }
 
-  function setEvaluationFilter(filter) {
-    state = { ...state, evaluationFilter: filter, evaluationPage: 0 }
-    requestRender()
-  }
-
-  function setEvaluationPage(page) {
-    state = { ...state, evaluationPage: page }
-    requestRender()
-  }
-
-  function pilotItem(result) {
-    const candidate = result.bestCandidate
-    const stateLabel = {
-      'strong-candidate': 'Strong candidate — review before confirming',
-      'review-candidate': 'Review candidate',
-      unresolved: 'Unresolved / no adequate candidate'
-    }[result.state]
-    const alternate = result.alternateCandidates.length
-      ? `<span>Alternates: ${result.alternateCandidates.map(item => `${escapeHtml(item.canonicalTitle)} (${Math.round(item.score * 100)}%)`).join(', ')}</span>`
+  function queueItem(item) {
+    const candidate = item.bestCandidate
+    const alternate = item.alternateCandidates.length
+      ? `<span>Alternates: ${item.alternateCandidates.map((alternateCandidate, index) => `${escapeHtml(alternateCandidate.canonicalTitle)} (${Math.round(alternateCandidate.score * 100)}%) <button class="small-button confirm-alternate" data-title-id="${escapeHtml(item.titleId)}" data-alternate-index="${index}">Confirm</button>`).join(' · ')}</span>`
       : ''
-    const lookupDetail = result.lookupNormalization.applied
-      ? `<span>TMDb search title: <strong>${escapeHtml(result.searchTitle)}</strong> · ${escapeHtml(result.lookupNormalization.transformation)}. ${escapeHtml(result.lookupNormalization.reason)}</span>`
+    const lookup = item.lookupNormalization.applied
+      ? `<span>TMDb search title: <strong>${escapeHtml(item.searchTitle)}</strong> · ${escapeHtml(item.lookupNormalization.transformation)}. ${escapeHtml(item.lookupNormalization.reason)}</span>`
       : ''
-    return `<li><strong>${escapeHtml(result.sourceTitle)}</strong>
-      <span>${escapeHtml(result.sourceNames.join(', ') || 'Unknown source')} · existing ${escapeHtml(result.existingType)}</span>
-      <span><strong>${escapeHtml(stateLabel)}</strong>${candidate ? ` · ${escapeHtml(candidate.canonicalTitle)} · ${escapeHtml(candidate.mediaType)}${candidate.releaseYear ? ` · ${candidate.releaseYear}` : ''} · ${Math.round(candidate.score * 100)}% · ${escapeHtml(candidate.reasons.join(' '))}` : ''}</span>
-      ${alternate}${result.error ? `<span>${escapeHtml(result.error)}</span>` : ''}
-      ${lookupDetail}
+    const controls = item.category === 'needs-review'
+      ? `<span><button class="small-button confirm-resolution" data-title-id="${escapeHtml(item.titleId)}">Confirm proposed identity</button> <button class="small-button reject-resolution" data-title-id="${escapeHtml(item.titleId)}">Reject</button></span>`
+      : ['confirmed', 'rejected', 'previously-resolved'].includes(item.category)
+        ? `<span><button class="small-button undo-resolution" data-title-id="${escapeHtml(item.titleId)}">Undo / correct</button></span>`
+        : ''
+    return `<li><strong>${escapeHtml(item.sourceTitle)}</strong>
+      <span>${escapeHtml(item.sourceNames.join(', ') || 'Unknown source')} · existing ${escapeHtml(item.existingType)}</span>
+      <span><strong>${escapeHtml(categoryLabel(item.category))}</strong>${candidate ? ` · ${escapeHtml(candidate.canonicalTitle)} · ${escapeHtml(candidate.mediaType)}${candidate.releaseYear ? ` · ${candidate.releaseYear}` : ''} · ${Math.round((candidate.score || item.resolution?.confidence || 0) * 100)}% · ${escapeHtml((candidate.reasons || []).join(' '))}` : ''}</span>
+      ${alternate}${lookup}${item.error ? `<span>${escapeHtml(item.error)}</span>` : ''}${controls}
     </li>`
   }
 
   function render(storeReady) {
     const counts = state.review?.counts
-    const synthetic = state.review?.syntheticDemo
-    const syntheticStatus = synthetic?.status || 'unresolved'
-    const evaluation = state.evaluation
-    const filteredResults = evaluation?.results.filter(result =>
-      state.evaluationFilter === 'all' || result.state === state.evaluationFilter
-    ) || []
-    const pageSize = 10
-    const pageCount = Math.max(1, Math.ceil(filteredResults.length / pageSize))
-    const page = Math.min(state.evaluationPage || 0, pageCount - 1)
-    const pageResults = filteredResults.slice(page * pageSize, (page + 1) * pageSize)
-
+    const queue = state.queue
+    const queueCounts = queue?.counts
+    const sortedItems = queue ? filterAndSortIdentityReviewQueue(queue.items, { category: state.filter, sort: state.sort }) : []
+    const pagination = paginateIdentityReviewQueue(sortedItems, state.page)
     return `
       <section class="import-section" aria-labelledby="identity-resolution-heading">
-        <div class="section-heading">
-          <h2 id="identity-resolution-heading">Metadata Enrichment &amp; Identity Resolution</h2>
-          <p>Private resolution records never rewrite playback history. Provider lookups run only through explicit review-only evaluations below.</p>
-        </div>
+        <div class="section-heading"><h2 id="identity-resolution-heading">Private Identity Resolution Review</h2><p>Matching results are recomputable browser-local review material. Only an explicit confirmation, rejection, or undo writes an append-only private resolution record.</p></div>
         <div class="import-panel">
-          <button class="action-button" id="refresh-identity-resolution" ${storeReady && state.status !== 'loading' ? '' : 'disabled'}>Refresh resolution status</button>
+          <button class="action-button" id="refresh-identity-resolution" ${storeReady && state.status !== 'loading' && state.status !== 'running-queue' ? '' : 'disabled'}>Refresh resolution status</button>
           ${state.status === 'loading' ? '<p>Reading private resolution state locally…</p>' : ''}
-          ${state.error ? `<p class="import-error">${state.error}</p>` : ''}
-          ${counts ? `<div class="analysis-grid">
-            <p><strong>${counts.unresolved}</strong> unresolved</p>
-            <p><strong>${counts.candidateMatch}</strong> candidate matches</p>
-            <p><strong>${counts.confidentlyResolved}</strong> confidently resolved</p>
-            <p><strong>${counts.manuallyConfirmed}</strong> manually confirmed</p>
-            <p><strong>${counts.manuallyRejected}</strong> manually rejected</p>
-          </div>` : ''}
+          ${state.status === 'running-queue' ? `<p>Matching locally: ${state.progress?.processed || 0} of ${state.progress?.total || 'eligible'} eligible records. Candidate results are not being saved.</p>` : ''}
+          ${state.error ? `<p class="import-error">${escapeHtml(state.error)}</p>` : ''}
+          ${counts ? `<div class="analysis-grid"><p><strong>${counts.unresolved}</strong> unresolved</p><p><strong>${counts.manuallyConfirmed}</strong> confirmed</p><p><strong>${counts.manuallyRejected}</strong> rejected</p><p><strong>${counts.confidentlyResolved + counts.candidateMatch}</strong> previously resolved</p></div>` : ''}
           <div class="import-preview">
-            <h3>TMDb matching evaluation</h3>
-            <p>Runs locally against a deterministic private-title sample. Results remain in this panel only; no candidate or resolution is persisted or automatically accepted.</p>
-            <button class="action-button" id="run-tmdb-matching-pilot" ${storeReady && state.status !== 'loading' && state.status !== 'running-evaluation' ? '' : 'disabled'}>${state.status === 'running-evaluation' ? 'Running evaluation…' : 'Run 10-title pilot'}</button>
-            <button class="action-button" id="run-tmdb-matching-evaluation" ${storeReady && state.status !== 'loading' && state.status !== 'running-evaluation' ? '' : 'disabled'}>${state.status === 'running-evaluation' ? 'Running evaluation…' : 'Run 50-title evaluation'}</button>
-            <button class="action-button" id="run-tmdb-matching-evaluation-200" ${storeReady && state.status !== 'loading' && state.status !== 'running-evaluation' ? '' : 'disabled'}>${state.status === 'running-evaluation' ? 'Running evaluation…' : 'Run 200-title evaluation'}</button>
-            ${evaluation ? `<div class="analysis-grid">
-              <p><strong>${evaluation.distribution['strong-candidate']}</strong> strong candidates</p>
-              <p><strong>${evaluation.distribution['review-candidate']}</strong> review candidates</p>
-              <p><strong>${evaluation.distribution.unresolved}</strong> unresolved</p>
-              <p><strong>${evaluation.noCandidateCases}</strong> no-candidate cases</p>
-              <p><strong>${evaluation.sameNameAmbiguityCases}</strong> same-name ambiguity cases</p>
-              <p><strong>${evaluation.typeConflicts}</strong> type conflicts</p>
-              <p><strong>${evaluation.crossSourceTitles}</strong> cross-source titles</p>
-              <p><strong>${evaluation.normalization.normalizedLookups}</strong> safely normalized lookups</p>
-              <p><strong>${evaluation.possibleFalseNegatives}</strong> possible false negatives</p>
-              <p><strong>${evaluation.obviousFalsePositives}</strong> obvious false positives</p>
-            </div>
-            <p>Confidence: ${evaluation.confidenceDistribution.noScore} no score · ${evaluation.confidenceDistribution.belowReview} below 75% · ${evaluation.confidenceDistribution.review75To84} at 75–84% · ${evaluation.confidenceDistribution.high85To99} at 85–99% · ${evaluation.confidenceDistribution.automaticEligible} at 99.5%+.</p>
-            <div class="actions">
-              <button class="small-button evaluation-filter" data-evaluation-filter="all">All</button>
-              <button class="small-button evaluation-filter" data-evaluation-filter="strong-candidate">Strong</button>
-              <button class="small-button evaluation-filter" data-evaluation-filter="review-candidate">Review</button>
-              <button class="small-button evaluation-filter" data-evaluation-filter="unresolved">Unresolved</button>
-            </div>
-            <ul class="analysis-list">${pageResults.map(pilotItem).join('')}</ul>
-            <div class="actions"><button class="small-button" id="evaluation-previous" data-evaluation-page="${page}" ${page === 0 ? 'disabled' : ''}>Previous</button><span>Page ${page + 1} of ${pageCount}</span><button class="small-button" id="evaluation-next" data-evaluation-page="${page}" ${page >= pageCount - 1 ? 'disabled' : ''}>Next</button></div>` : ''}
-          </div>
-          <div class="import-preview">
-            <h3>Synthetic review exercise</h3>
-            <p><strong>${escapeHtml(SYNTHETIC_CANDIDATE.canonicalTitle)}</strong> · ${escapeHtml(SYNTHETIC_CANDIDATE.mediaType)} · ${Math.round(SYNTHETIC_CANDIDATE.confidence * 100)}% confidence</p>
-            <p>${escapeHtml(SYNTHETIC_CANDIDATE.reasons[0])} This is not based on any imported title and does not resolve or merge your history.</p>
-            <p>Current synthetic decision: <strong>${escapeHtml(syntheticStatus)}</strong>.</p>
-            ${syntheticStatus === 'unresolved' || syntheticStatus === 'candidate-match'
-              ? '<button class="action-button" id="confirm-synthetic-resolution">Confirm synthetic candidate</button> <button class="action-button" id="reject-synthetic-resolution">Reject synthetic candidate</button>'
-              : '<button class="action-button" id="undo-synthetic-resolution">Undo synthetic decision</button>'}
+            <h3>TMDb review queue</h3><p>Runs against every eligible private title record with sequential throttling. A 429 response stops safely; retrying only re-queries remaining records.</p>
+            <button class="action-button" id="run-tmdb-review-queue" ${storeReady && state.status !== 'loading' && state.status !== 'running-queue' ? '' : 'disabled'}>${state.status === 'running-queue' ? 'Matching queue…' : 'Run full matching queue'}</button>
+            ${queue?.pendingTitleIds.length ? '<button class="action-button" id="retry-tmdb-review-queue">Retry remaining records</button>' : ''}
+            ${queueCounts ? `<div class="analysis-grid"><p><strong>${queue.eligibleCount}</strong> eligible · <strong>${queue.processedCount}</strong> processed this run</p><p><strong>${queueCounts['needs-review']}</strong> needs review</p><p><strong>${queueCounts.unresolved}</strong> unresolved</p><p><strong>${queueCounts.confirmed}</strong> confirmed</p><p><strong>${queueCounts.rejected}</strong> rejected</p><p><strong>${queueCounts['previously-resolved']}</strong> previously resolved</p><p><strong>${queueCounts.normalizedLookups}</strong> normalized lookups</p><p><strong>${queueCounts.noCandidateCases}</strong> no-candidate cases</p></div>${queue.haltedReason ? `<p class="import-error">${escapeHtml(queue.haltedReason)}</p>` : ''}` : ''}
+            ${queue ? `<div class="actions"><button class="small-button queue-filter" data-queue-filter="all">All</button><button class="small-button queue-filter" data-queue-filter="needs-review">Needs review</button><button class="small-button queue-filter" data-queue-filter="unresolved">Unresolved</button><button class="small-button queue-filter" data-queue-filter="confirmed">Confirmed</button><button class="small-button queue-filter" data-queue-filter="rejected">Rejected</button><button class="small-button queue-filter" data-queue-filter="previously-resolved">Previously resolved</button><label>Sort <select id="queue-sort"><option value="priority" ${state.sort === 'priority' ? 'selected' : ''}>Review priority</option><option value="confidence" ${state.sort === 'confidence' ? 'selected' : ''}>Confidence</option><option value="title" ${state.sort === 'title' ? 'selected' : ''}>Source title</option></select></label></div><ul class="analysis-list">${pagination.items.map(queueItem).join('')}</ul><div class="actions"><button class="small-button" id="queue-previous" ${pagination.page === 0 ? 'disabled' : ''}>Previous</button><span>Page ${pagination.page + 1} of ${pagination.pageCount}</span><button class="small-button" id="queue-next" ${pagination.page >= pagination.pageCount - 1 ? 'disabled' : ''}>Next</button></div>` : ''}
           </div>
         </div>
-      </section>
-    `
+      </section>`
   }
 
   function bind(storeReady) {
     if (!storeReady) return
     document.querySelector('#refresh-identity-resolution')?.addEventListener('click', refresh)
-    document.querySelector('#confirm-synthetic-resolution')?.addEventListener('click', () => recordSyntheticDecision('manually-confirmed'))
-    document.querySelector('#reject-synthetic-resolution')?.addEventListener('click', () => recordSyntheticDecision('manually-rejected'))
-    document.querySelector('#undo-synthetic-resolution')?.addEventListener('click', undoSyntheticDecision)
-    document.querySelector('#run-tmdb-matching-pilot')?.addEventListener('click', () => runEvaluation(10))
-    document.querySelector('#run-tmdb-matching-evaluation')?.addEventListener('click', () => runEvaluation(50))
-    document.querySelector('#run-tmdb-matching-evaluation-200')?.addEventListener('click', () => runEvaluation(200))
-    document.querySelectorAll('.evaluation-filter').forEach(button => {
-      button.addEventListener('click', () => setEvaluationFilter(button.dataset.evaluationFilter))
-    })
-    document.querySelector('#evaluation-previous')?.addEventListener('click', event => setEvaluationPage(Number(event.currentTarget.dataset.evaluationPage) - 1))
-    document.querySelector('#evaluation-next')?.addEventListener('click', event => setEvaluationPage(Number(event.currentTarget.dataset.evaluationPage) + 1))
+    document.querySelector('#run-tmdb-review-queue')?.addEventListener('click', () => runQueue())
+    document.querySelector('#retry-tmdb-review-queue')?.addEventListener('click', () => runQueue(true))
+    document.querySelectorAll('.queue-filter').forEach(button => button.addEventListener('click', () => setFilter(button.dataset.queueFilter)))
+    document.querySelector('#queue-sort')?.addEventListener('change', event => setSort(event.currentTarget.value))
+    document.querySelector('#queue-previous')?.addEventListener('click', () => setPage(state.page - 1))
+    document.querySelector('#queue-next')?.addEventListener('click', () => setPage(state.page + 1))
+    document.querySelectorAll('.confirm-resolution').forEach(button => button.addEventListener('click', () => { const item = state.queue?.items.find(queueItem => queueItem.titleId === button.dataset.titleId); recordDecision(item, item?.bestCandidate, 'manually-confirmed') }))
+    document.querySelectorAll('.reject-resolution').forEach(button => button.addEventListener('click', () => { const item = state.queue?.items.find(queueItem => queueItem.titleId === button.dataset.titleId); recordDecision(item, item?.bestCandidate, 'manually-rejected') }))
+    document.querySelectorAll('.confirm-alternate').forEach(button => button.addEventListener('click', () => { const item = state.queue?.items.find(queueItem => queueItem.titleId === button.dataset.titleId); recordDecision(item, item?.alternateCandidates[Number(button.dataset.alternateIndex)], 'manually-confirmed') }))
+    document.querySelectorAll('.undo-resolution').forEach(button => button.addEventListener('click', () => undoDecision(state.queue?.items.find(queueItem => queueItem.titleId === button.dataset.titleId))))
   }
 
   return { bind, render, refresh }

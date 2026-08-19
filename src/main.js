@@ -53,7 +53,10 @@ const importBatchMaintenancePanel = createImportBatchMaintenancePanel({
   requestRender: render,
   onRemovalComplete: refreshPrivateDataViews
 })
-const identityResolutionPanel = createIdentityResolutionPanel({ requestRender: render })
+const identityResolutionPanel = createIdentityResolutionPanel({
+  requestRender: render,
+  onIdentityResolutionChanged: () => viewingAnalysisPanel.refresh()
+})
 const tmdbCredentialPanel = createTmdbCredentialPanel({ requestRender: render })
 
 const shows = recommendationData.recommendations.map(recommendation => {

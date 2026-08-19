@@ -18,7 +18,8 @@
     "test:tmdb-credential-store": "node tests/tmdbCredentialStore.test.js",
     "test:tmdb-connection": "node tests/tmdbConnectionTest.test.js",
     "test:tmdb-client": "node tests/tmdbClient.test.js",
-    "test:tmdb-pilot": "node tests/tmdbMatchingPilot.test.js"
+    "test:tmdb-pilot": "node tests/tmdbMatchingPilot.test.js",
+    "test:identity-review-queue": "node tests/identityReviewQueue.test.js"
   },
   "devDependencies": {
     "vite": "^8.2.0",

@@ -10,6 +10,23 @@ function sourceTitleFor(event, title) {
   return event.observations?.sourceTitle || title?.originalTitle || title?.title || event.titleId
 }
 
+function latestResolutionsByTitle(resolutions) {
+  const superseded = new Set(resolutions.map(record => record.supersedesResolutionId).filter(Boolean))
+  return new Map(resolutions.filter(record => !superseded.has(record.id)).map(record => [record.sourceTitleId, record]))
+}
+
+function confirmedIdentity(title, resolution) {
+  const candidate = resolution?.candidate
+  if (!candidate || !['manually-confirmed', 'confidently-resolved'].includes(resolution.status)) return null
+  if (!candidate.provider || !candidate.externalId || !candidate.canonicalTitle || !candidate.mediaType) return null
+  return {
+    id: `${candidate.provider}:${candidate.externalId}`,
+    canonicalTitle: candidate.canonicalTitle,
+    titleType: candidate.mediaType,
+    confidence: resolution.status === 'manually-confirmed' ? 'manually-confirmed' : 'confirmed-resolution'
+  }
+}
+
 function createSummary({ id, title, sourceId, sourceName, unresolved }) {
   return {
     id,
@@ -73,26 +90,38 @@ function finalizeSummary(summary) {
   }
 }
 
-export function deriveViewingAnalysis({ events = [], titles = [], sources = [] }) {
+export function deriveViewingAnalysis({ events = [], titles = [], sources = [], resolutions = [] }) {
   const titlesById = new Map(titles.map(title => [title.id, title]))
   const sourceNames = new Map(sources.map(source => [source.id, source.name || source.id]))
   const summariesByKey = new Map()
   const sourceEventCounts = {}
   const dates = []
+  const resolutionsByTitle = latestResolutionsByTitle(resolutions)
 
   for (const event of events) {
     if (event.eventType !== 'playback') continue
 
     const title = titlesById.get(event.titleId)
+    const identity = confirmedIdentity(title, resolutionsByTitle.get(event.titleId))
     const sourceId = event.provenance?.sourceId || 'source:unknown'
     const sourceName = sourceNames.get(sourceId) || sourceId
-    const normalizedTitle = normalizeIdentity(title?.title)
-    const reliablyResolved = (title?.type === 'movie' || title?.type === 'series') && normalizedTitle
-    const key = reliablyResolved
+    const normalizedTitle = normalizeIdentity(identity?.canonicalTitle || title?.title)
+    const reliablyResolved = Boolean(identity) || ((title?.type === 'movie' || title?.type === 'series') && normalizedTitle)
+    const key = identity
+      ? `confirmed:${identity.id}`
+      : reliablyResolved
       ? `resolved:${title.type}:${normalizedTitle}`
       : `unresolved:${sourceId}:${event.titleId}`
     const summary = summariesByKey.get(key)
-      || createSummary({ id: key, title, sourceId, sourceName, unresolved: !reliablyResolved })
+      || createSummary({
+        id: key,
+        title: identity ? { title: identity.canonicalTitle, type: identity.titleType } : title,
+        sourceId,
+        sourceName,
+        unresolved: !reliablyResolved
+      })
+
+    if (identity) summary.identityConfidence = identity.confidence
 
     summariesByKey.set(key, summary)
     addEvent(summary, event, title, sourceName)

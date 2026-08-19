@@ -1,4 +1,4 @@
-import { PRIVATE_STORES, listPrivateRecords } from './privateStore.js'
+import { PRIVATE_STORES, getPrivateIdentityResolutionReview, listPrivateRecords } from './privateStore.js'
 import {
   confidenceTier,
   createIdentityMatchQuery,
@@ -106,6 +106,91 @@ function safeSearchError(error) {
   return 'TMDb search was unavailable (network or browser restriction).'
 }
 
+function pause(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds))
+}
+
+function latestResolutionsByTitle(resolutions = []) {
+  const superseded = new Set(resolutions.map(record => record.supersedesResolutionId).filter(Boolean))
+  return new Map(resolutions.filter(record => !superseded.has(record.id)).map(record => [record.sourceTitleId, record]))
+}
+
+function persistedQueueItem(record, resolution) {
+  const category = resolution.status === 'manually-confirmed'
+    ? 'confirmed'
+    : resolution.status === 'manually-rejected'
+      ? 'rejected'
+      : 'previously-resolved'
+  return {
+    titleId: record.title.id,
+    sourceTitle: record.sourceTitle,
+    sourceNames: record.sourceNames,
+    sourceIds: record.sourceIds,
+    existingType: record.title.type,
+    searchTitle: record.searchTitle,
+    lookupNormalization: record.lookupNormalization,
+    category,
+    state: category,
+    bestCandidate: resolution.candidate || null,
+    alternateCandidates: [],
+    providerCandidateCount: 0,
+    typeConflictDetected: false,
+    possibleFalseNegative: false,
+    searchedMediaTypes: mediaTypesFor(record),
+    error: null,
+    resolution
+  }
+}
+
+function categoryForResult(result) {
+  return result.state === 'review-candidate' || result.state === 'strong-candidate'
+    ? 'needs-review'
+    : 'unresolved'
+}
+
+export function summarizeIdentityReviewQueue(items) {
+  return items.reduce((counts, item) => {
+    counts[item.category] += 1
+    if (item.lookupNormalization.applied) counts.normalizedLookups += 1
+    if (item.providerCandidateCount === 0 && !item.error && ['needs-review', 'unresolved'].includes(item.category)) counts.noCandidateCases += 1
+    if (item.alternateCandidates.length) counts.sameNameAmbiguityCases += 1
+    if (item.typeConflictDetected) counts.typeConflicts += 1
+    if (item.possibleFalseNegative) counts.possibleFalseNegatives += 1
+    if (item.sourceIds.length > 1) counts.crossSourceTitles += 1
+    return counts
+  }, {
+    'needs-review': 0,
+    unresolved: 0,
+    confirmed: 0,
+    rejected: 0,
+    'previously-resolved': 0,
+    normalizedLookups: 0,
+    noCandidateCases: 0,
+    sameNameAmbiguityCases: 0,
+    typeConflicts: 0,
+    possibleFalseNegatives: 0,
+    crossSourceTitles: 0
+  })
+}
+
+export function filterAndSortIdentityReviewQueue(items, { category = 'all', sort = 'priority' } = {}) {
+  const filtered = items.filter(item => category === 'all' || item.category === category)
+  return [...filtered].sort((left, right) => {
+    if (sort === 'title') return left.sourceTitle.localeCompare(right.sourceTitle) || left.titleId.localeCompare(right.titleId)
+    if (sort === 'confidence') return (right.bestCandidate?.score || 0) - (left.bestCandidate?.score || 0) || left.sourceTitle.localeCompare(right.sourceTitle)
+    const priority = { 'needs-review': 0, unresolved: 1, confirmed: 2, rejected: 3, 'previously-resolved': 4 }
+    return priority[left.category] - priority[right.category]
+      || (right.bestCandidate?.score || 0) - (left.bestCandidate?.score || 0)
+      || left.sourceTitle.localeCompare(right.sourceTitle)
+  })
+}
+
+export function paginateIdentityReviewQueue(items, page = 0, pageSize = 10) {
+  const pageCount = Math.max(1, Math.ceil(items.length / pageSize))
+  const safePage = Math.min(Math.max(page, 0), pageCount - 1)
+  return { page: safePage, pageCount, items: items.slice(safePage * pageSize, (safePage + 1) * pageSize) }
+}
+
 function normalizeTitle(value) {
   return String(value || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase()
 }
@@ -163,6 +248,32 @@ function summarizeEvaluation(results) {
   }
 }
 
+async function evaluateRecord(record, searchCandidates) {
+  const lookupTitle = { ...record.title, title: record.searchTitle, originalTitle: record.searchTitle, type: record.lookupNormalization.mediaTypeHint || record.title.type }
+  const query = createIdentityMatchQuery(lookupTitle, record.events)
+  try {
+    const candidates = await searchCandidates({ query: record.searchTitle, mediaTypes: mediaTypesFor(record) })
+    const rankedCandidates = rankIdentityCandidates(query, candidates)
+    const exactNameCandidates = candidates.filter(candidate => normalizeTitle(candidate.canonicalTitle) === normalizeTitle(record.searchTitle))
+    return {
+      titleId: record.title.id, sourceTitle: record.sourceTitle, sourceNames: record.sourceNames, sourceIds: record.sourceIds,
+      existingType: record.title.type, searchTitle: record.searchTitle, lookupNormalization: record.lookupNormalization,
+      state: resultState(rankedCandidates[0]), bestCandidate: rankedCandidates[0] || null, alternateCandidates: rankedCandidates.slice(1, 3),
+      providerCandidateCount: candidates.length,
+      typeConflictDetected: Boolean(query.mediaTypeHint && exactNameCandidates.some(candidate => candidate.mediaType !== query.mediaTypeHint)),
+      possibleFalseNegative: rankedCandidates.length > 0 && rankedCandidates[0].score < 0.75,
+      searchedMediaTypes: mediaTypesFor(record), error: null, errorStatus: null
+    }
+  } catch (error) {
+    return {
+      titleId: record.title.id, sourceTitle: record.sourceTitle, sourceNames: record.sourceNames, sourceIds: record.sourceIds,
+      existingType: record.title.type, searchTitle: record.searchTitle, lookupNormalization: record.lookupNormalization,
+      state: 'unresolved', bestCandidate: null, alternateCandidates: [], providerCandidateCount: 0,
+      typeConflictDetected: false, possibleFalseNegative: false, searchedMediaTypes: mediaTypesFor(record), error: safeSearchError(error), errorStatus: error?.status || null
+    }
+  }
+}
+
 export async function runTmdbMatchingEvaluationFromRecords(records, {
   limit = 10,
   selection = limit === 10 ? selectTmdbPilotTitles : selectTmdbEvaluationTitles,
@@ -173,59 +284,54 @@ export async function runTmdbMatchingEvaluationFromRecords(records, {
 
   const results = []
   for (const record of selected) {
-    const lookupTitle = { ...record.title, title: record.searchTitle, originalTitle: record.searchTitle, type: record.lookupNormalization.mediaTypeHint || record.title.type }
-    const query = createIdentityMatchQuery(lookupTitle, record.events)
-    try {
-      const candidates = await searchCandidates({
-        query: record.searchTitle,
-        mediaTypes: mediaTypesFor(record)
-      })
-      const rankedCandidates = rankIdentityCandidates(query, candidates)
-      const exactNameCandidates = candidates.filter(candidate =>
-        normalizeTitle(candidate.canonicalTitle) === normalizeTitle(record.searchTitle)
-      )
-      const typeConflictDetected = Boolean(query.mediaTypeHint && exactNameCandidates.some(candidate =>
-        candidate.mediaType !== query.mediaTypeHint
-      ))
-      results.push({
-        titleId: record.title.id,
-        sourceTitle: record.sourceTitle,
-        sourceNames: record.sourceNames,
-        sourceIds: record.sourceIds,
-        existingType: record.title.type,
-        searchTitle: record.searchTitle,
-        lookupNormalization: record.lookupNormalization,
-        state: resultState(rankedCandidates[0]),
-        bestCandidate: rankedCandidates[0] || null,
-        alternateCandidates: rankedCandidates.slice(1, 3),
-        providerCandidateCount: candidates.length,
-        typeConflictDetected,
-        possibleFalseNegative: rankedCandidates.length > 0 && rankedCandidates[0].score < 0.75,
-        searchedMediaTypes: mediaTypesFor(record),
-        error: null
-      })
-    } catch (error) {
-      results.push({
-        titleId: record.title.id,
-        sourceTitle: record.sourceTitle,
-        sourceNames: record.sourceNames,
-        sourceIds: record.sourceIds,
-        existingType: record.title.type,
-        searchTitle: record.searchTitle,
-        lookupNormalization: record.lookupNormalization,
-        state: 'unresolved',
-        bestCandidate: null,
-        alternateCandidates: [],
-        providerCandidateCount: 0,
-        typeConflictDetected: false,
-        possibleFalseNegative: false,
-        searchedMediaTypes: mediaTypesFor(record),
-        error: safeSearchError(error)
-      })
-    }
+    results.push(await evaluateRecord(record, searchCandidates))
   }
 
   return { results, ...summarizeEvaluation(results) }
+}
+
+export async function runTmdbIdentityReviewQueueFromRecords(records, {
+  searchCandidates = searchTmdbCandidates,
+  onProgress = () => {},
+  throttleMs = 75,
+  eligibleTitleIds = null,
+  previousItems = []
+} = {}) {
+  const sourcesById = new Map((records.sources || []).map(source => [source.id, source]))
+  const titleRecords = (records.titles || []).map(title => titleRecord(title, records.events || [], sourcesById)).filter(record => record.events.length)
+  const latest = latestResolutionsByTitle(records.resolutions || [])
+  const allowed = eligibleTitleIds ? new Set(eligibleTitleIds) : null
+  const persistentItems = titleRecords.filter(record => latest.has(record.title.id)).map(record => persistedQueueItem(record, latest.get(record.title.id)))
+  const eligible = titleRecords.filter(record => !latest.has(record.title.id) && (!allowed || allowed.has(record.title.id)))
+  const matchedItems = []
+  let pendingTitleIds = []
+  let haltedReason = null
+
+  for (let index = 0; index < eligible.length; index += 1) {
+    if (index > 0 && throttleMs > 0) await pause(throttleMs)
+    const result = await evaluateRecord(eligible[index], searchCandidates)
+    if (result.errorStatus === 429) {
+      pendingTitleIds = eligible.slice(index).map(record => record.title.id)
+      haltedReason = 'TMDb rate-limited the queue. Retry the remaining records later.'
+      await onProgress({ processed: index, total: eligible.length, halted: true })
+      break
+    }
+    matchedItems.push({ ...result, category: categoryForResult(result), resolution: null })
+    if (index === eligible.length - 1 || index % 5 === 4) await onProgress({ processed: index + 1, total: eligible.length, halted: false })
+  }
+
+  const itemsByTitle = new Map(previousItems.map(item => [item.titleId, item]))
+  for (const item of persistentItems) itemsByTitle.set(item.titleId, item)
+  for (const item of matchedItems) itemsByTitle.set(item.titleId, item)
+  const items = [...itemsByTitle.values()]
+  return {
+    items,
+    counts: summarizeIdentityReviewQueue(items),
+    eligibleCount: eligible.length,
+    processedCount: matchedItems.length,
+    pendingTitleIds,
+    haltedReason
+  }
 }
 
 export async function runTmdbMatchingPilotFromRecords(records, options = {}) {
@@ -248,4 +354,14 @@ export async function runTmdbMatchingEvaluation(limit = 50) {
     listPrivateRecords(PRIVATE_STORES.sources)
   ])
   return runTmdbMatchingEvaluationFromRecords({ titles, events, sources }, { limit })
+}
+
+export async function runTmdbIdentityReviewQueue(options = {}) {
+  const [titles, events, sources, review] = await Promise.all([
+    listPrivateRecords(PRIVATE_STORES.titles),
+    listPrivateRecords(PRIVATE_STORES.historyEvents),
+    listPrivateRecords(PRIVATE_STORES.sources),
+    getPrivateIdentityResolutionReview()
+  ])
+  return runTmdbIdentityReviewQueueFromRecords({ titles, events, sources, resolutions: review.resolutions }, options)
 }

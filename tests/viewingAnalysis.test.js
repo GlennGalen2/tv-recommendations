@@ -14,6 +14,19 @@ const titles = [
   { id: 'title:amazon:unknown', type: 'unknown', title: 'Unresolved Playback' }
 ]
 
+const resolutions = [
+  {
+    id: 'resolution:netflix:unknown', sourceTitleId: 'title:netflix:unknown', status: 'manually-confirmed',
+    candidate: { provider: 'synthetic-provider', externalId: 'canonical-unresolved', mediaType: 'series', canonicalTitle: 'Confirmed Synthetic Series' },
+    supersedesResolutionId: null
+  },
+  {
+    id: 'resolution:amazon:unknown', sourceTitleId: 'title:amazon:unknown', status: 'manually-confirmed',
+    candidate: { provider: 'synthetic-provider', externalId: 'canonical-unresolved', mediaType: 'series', canonicalTitle: 'Confirmed Synthetic Series' },
+    supersedesResolutionId: null
+  }
+]
+
 function playback(id, titleId, sourceId, occurredOn, mediaScope = { level: 'title' }) {
   return {
     id,
@@ -28,6 +41,7 @@ function playback(id, titleId, sourceId, occurredOn, mediaScope = { level: 'titl
 
 const analysis = deriveViewingAnalysis({
   sources,
+  resolutions,
   titles,
   events: [
     playback('evt-n1', 'title:netflix:orbit', 'source:netflix', '2024-01-01', { level: 'episode', seasonNumber: 1, episodeNumber: 1 }),
@@ -43,11 +57,11 @@ const analysis = deriveViewingAnalysis({
 })
 
 assert.equal(analysis.totals.playbackEvents, 8)
-assert.equal(analysis.totals.distinctNormalizedTitles, 4)
+assert.equal(analysis.totals.distinctNormalizedTitles, 3)
 assert.deepEqual(analysis.totals.sourceEventCounts, { Netflix: 6, 'Amazon Prime Video': 2 })
-assert.equal(analysis.totals.knownSeries, 1)
+assert.equal(analysis.totals.knownSeries, 2)
 assert.equal(analysis.totals.knownMovies, 1)
-assert.equal(analysis.totals.unresolvedTitles, 2)
+assert.equal(analysis.totals.unresolvedTitles, 0)
 assert.deepEqual(analysis.totals.dateRange, { earliest: '2024-01-01', latest: '2024-03-02' })
 
 const orbit = analysis.summaries.find(summary => summary.canonicalTitle === 'Orbit Station')
@@ -56,14 +70,17 @@ assert.equal(orbit.distinctEpisodeCount, 3)
 assert.deepEqual(orbit.seasonsRepresented, [1])
 assert.equal(orbit.repeatPlaybackDetected, true)
 assert.deepEqual(orbit.services, ['Amazon Prime Video', 'Netflix'])
-assert.equal(analysis.multiSourceTitles.length, 1)
+assert.equal(analysis.multiSourceTitles.length, 2)
 
 const film = analysis.summaries.find(summary => summary.canonicalTitle === 'Synthetic Film')
 assert.equal(film.repeatPlaybackDetected, true)
 assert.equal(film.repeatPlaybackCount, 1)
 
-assert.equal(analysis.unresolvedReferences.length, 2)
-assert.notEqual(analysis.unresolvedReferences[0].id, analysis.unresolvedReferences[1].id)
+const confirmed = analysis.summaries.find(summary => summary.canonicalTitle === 'Confirmed Synthetic Series')
+assert.equal(confirmed.playbackEventCount, 2)
+assert.deepEqual(confirmed.services, ['Amazon Prime Video', 'Netflix'])
+assert.equal(confirmed.identityConfidence, 'manually-confirmed')
+assert.equal(analysis.unresolvedReferences.length, 0)
 assert.equal(JSON.stringify(analysis).includes('liked'), false)
 assert.equal(JSON.stringify(analysis).includes('reaction'), false)
 
