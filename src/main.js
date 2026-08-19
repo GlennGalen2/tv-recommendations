@@ -19,6 +19,7 @@ import { createImportBatchMaintenancePanel } from './ui/importBatchMaintenancePa
 import { createIdentityResolutionPanel } from './ui/identityResolutionPanel.js'
 import { createTmdbCredentialPanel } from './ui/tmdbCredentialPanel.js'
 import { createPreferencePanel } from './ui/preferencePanel.js'
+import { createRecommendationEnginePanel } from './ui/recommendationEnginePanel.js'
 
 const titlesById = new Map(
   catalog.titles.map(title => [title.id, title])
@@ -56,13 +57,14 @@ const importBatchMaintenancePanel = createImportBatchMaintenancePanel({
 })
 const identityResolutionPanel = createIdentityResolutionPanel({
   requestRender: render,
-  onIdentityResolutionChanged: () => viewingAnalysisPanel.refresh()
+  onIdentityResolutionChanged: () => Promise.all([viewingAnalysisPanel.refresh(), recommendationEnginePanel.refresh()])
 })
 const preferencePanel = createPreferencePanel({
   requestRender: render,
   onPreferenceChanged: () => refreshPrivateDataViews()
 })
 const tmdbCredentialPanel = createTmdbCredentialPanel({ requestRender: render })
+const recommendationEnginePanel = createRecommendationEnginePanel({ requestRender: render })
 
 const shows = recommendationData.recommendations.map(recommendation => {
   const title = titlesById.get(recommendation.titleId)
@@ -165,6 +167,7 @@ async function refreshPrivateDataViews() {
     importBatchMaintenancePanel.refresh(),
     identityResolutionPanel.refresh(),
     preferencePanel.refresh(),
+    recommendationEnginePanel.refresh(),
     tmdbCredentialPanel.refresh()
   ])
 }
@@ -456,6 +459,8 @@ function render() {
 
       ${preferencePanel.render(privateDemoState.status === 'ready')}
 
+      ${recommendationEnginePanel.render(privateDemoState.status === 'ready')}
+
       ${tmdbCredentialPanel.render(privateDemoState.status === 'ready')}
 
       <section class="recent-section">
@@ -500,6 +505,7 @@ function render() {
   importBatchMaintenancePanel.bind(privateDemoState.status === 'ready')
   identityResolutionPanel.bind(privateDemoState.status === 'ready')
   preferencePanel.bind(privateDemoState.status === 'ready')
+  recommendationEnginePanel.bind(privateDemoState.status === 'ready')
   tmdbCredentialPanel.bind(privateDemoState.status === 'ready')
 }
 

@@ -20,7 +20,8 @@
     "test:tmdb-client": "node tests/tmdbClient.test.js",
     "test:tmdb-pilot": "node tests/tmdbMatchingPilot.test.js",
     "test:identity-review-queue": "node tests/identityReviewQueue.test.js",
-    "test:private-preferences": "node tests/privatePreferences.test.js"
+    "test:private-preferences": "node tests/privatePreferences.test.js",
+    "test:recommendation-engine": "node tests/recommendationEngine.test.js"
   },
   "devDependencies": {
     "vite": "^8.2.0",

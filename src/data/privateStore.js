@@ -1,5 +1,6 @@
 import { deriveViewingAnalysis } from './viewingAnalysis.js'
 import { derivePrivatePreferenceAnalysis } from './privatePreferences.js'
+import { deriveRecommendations } from './recommendationEngine.js'
 
 const DATABASE_NAME = 'tv-recommendations-private'
 const DATABASE_VERSION = 2
@@ -312,6 +313,16 @@ export async function getPrivatePreferenceAnalysis() {
     listPrivateRecords(PRIVATE_STORES.identityResolutions)
   ])
   return derivePrivatePreferenceAnalysis({ reactions, events, titles, resolutions })
+}
+
+export async function getPrivateRecommendationAnalysis(options = {}) {
+  const [titles, events, reactions, resolutions] = await Promise.all([
+    listPrivateRecords(PRIVATE_STORES.titles),
+    listPrivateRecords(PRIVATE_STORES.historyEvents),
+    listPrivateRecords(PRIVATE_STORES.reactions),
+    listPrivateRecords(PRIVATE_STORES.identityResolutions)
+  ])
+  return deriveRecommendations({ titles, events, reactions, resolutions, ...options })
 }
 
 const IDENTITY_RESOLUTION_STATUSES = new Set([
