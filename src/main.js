@@ -1,12 +1,30 @@
 import './style.css'
 import catalog from '../data/v1/catalog/titles.json'
 import recommendationData from '../data/v1/recommendations/recommendations.json'
+import {
+  PRIVATE_STORES,
+  createHistoryEvent,
+  createPrivateRecord,
+  createReaction,
+  initializePrivateStore,
+  listPrivateRecords,
+  readPrivateRecord,
+  supersedeReaction
+} from './data/privateStore.js'
 
 const titlesById = new Map(
   catalog.titles.map(title => [title.id, title])
 )
 
 const DEMO_UI_STATE_KEY = 'tv-app-demo-ui-state-v1'
+const PRIVATE_DEMO_VIEWER_ID = 'viewer-1'
+
+let privateDemoState = {
+  status: 'loading',
+  error: null,
+  watchedTitleIds: new Set(),
+  reactionsByTitle: new Map()
+}
 
 const shows = recommendationData.recommendations.map(recommendation => {
   const title = titlesById.get(recommendation.titleId)
@@ -46,8 +64,6 @@ function saveDemoUiState(state) {
 function ensureDemoShowState(state, id, workflowStatus = 'unwatched') {
   if (!state[id]) {
     state[id] = {
-      watched: false,
-      rating: null,
       saved: workflowStatus === 'saved'
     }
   }
@@ -55,30 +71,183 @@ function ensureDemoShowState(state, id, workflowStatus = 'unwatched') {
   return state[id]
 }
 
-function updateShow(id, action) {
-  const state = loadDemoUiState()
-  const showState = ensureDemoShowState(state, id)
+function createPrivateId(prefix) {
+  const value = globalThis.crypto?.randomUUID?.()
+    || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 
-  if (action === 'watched') {
-    showState.watched = !showState.watched
+  return `${prefix}_${value}`
+}
+
+async function ensurePrivateRecord(storeName, record) {
+  const existing = await readPrivateRecord(storeName, record.id)
+
+  if (!existing) {
+    await createPrivateRecord(storeName, record)
+  }
+}
+
+async function refreshPrivateDemoState() {
+  const [events, reactions] = await Promise.all([
+    listPrivateRecords(PRIVATE_STORES.historyEvents, {
+      indexName: 'by-viewer',
+      query: PRIVATE_DEMO_VIEWER_ID
+    }),
+    listPrivateRecords(PRIVATE_STORES.reactions, {
+      indexName: 'by-viewer',
+      query: PRIVATE_DEMO_VIEWER_ID
+    })
+  ])
+
+  const reactionsByTitle = new Map()
+
+  for (const reaction of reactions) {
+    const current = reactionsByTitle.get(reaction.titleId)
+
+    if (!current || reaction.recordedAt > current.recordedAt) {
+      reactionsByTitle.set(reaction.titleId, reaction)
+    }
   }
 
-  if (action === 'liked') {
-    showState.rating =
-      showState.rating === 'liked' ? null : 'liked'
+  privateDemoState = {
+    status: 'ready',
+    error: null,
+    watchedTitleIds: new Set(
+      events
+        .filter(event => event.eventType === 'completed')
+        .map(event => event.titleId)
+    ),
+    reactionsByTitle
+  }
+}
+
+async function initializePrivateDemo() {
+  try {
+    await initializePrivateStore()
+    await ensurePrivateRecord(PRIVATE_STORES.sources, {
+      id: 'source:manual',
+      schemaVersion: 1,
+      name: 'Synthetic manual demo',
+      kind: 'manual'
+    })
+
+    for (const viewer of [
+      { id: 'viewer-1', displayName: 'Viewer 1' },
+      { id: 'viewer-2', displayName: 'Viewer 2' }
+    ]) {
+      await ensurePrivateRecord(PRIVATE_STORES.viewers, {
+        ...viewer,
+        schemaVersion: 1,
+        active: true
+      })
+    }
+
+    await refreshPrivateDemoState()
+  } catch (error) {
+    privateDemoState = {
+      ...privateDemoState,
+      status: 'error',
+      error
+    }
   }
 
-  if (action === 'disliked') {
-    showState.rating =
-      showState.rating === 'disliked' ? null : 'disliked'
-  }
-
-  if (action === 'saved') {
-    showState.saved = !showState.saved
-  }
-
-  saveDemoUiState(state)
   render()
+}
+
+async function recordPrivateWatch(show) {
+  if (privateDemoState.watchedTitleIds.has(show.id)) {
+    return
+  }
+
+  await createHistoryEvent({
+    id: createPrivateId('evt'),
+    schemaVersion: 1,
+    viewerIds: [PRIVATE_DEMO_VIEWER_ID],
+    titleId: show.id,
+    eventType: 'completed',
+    mediaScope: { level: 'title' },
+    occurredAt: new Date().toISOString(),
+    observations: {
+      sourceTitle: show.title,
+      note: 'Synthetic in-app private-store test'
+    },
+    provenance: {
+      sourceId: 'source:manual',
+      importBatchId: null,
+      sourceRecordId: 'private-demo-ui'
+    }
+  })
+
+  await refreshPrivateDemoState()
+}
+
+async function recordPrivateReaction(show, reaction) {
+  const current = privateDemoState.reactionsByTitle.get(show.id)
+
+  if (current?.reaction === reaction) {
+    return
+  }
+
+  const nextReaction = {
+    id: createPrivateId('rct'),
+    schemaVersion: 1,
+    viewerId: PRIVATE_DEMO_VIEWER_ID,
+    titleId: show.id,
+    reaction,
+    recordedAt: new Date().toISOString(),
+    supersedesReactionId: current?.id ?? null,
+    provenance: {
+      sourceId: 'source:manual',
+      sourceRecordId: 'private-demo-ui'
+    }
+  }
+
+  if (current) {
+    await supersedeReaction(nextReaction)
+  } else {
+    await createReaction(nextReaction)
+  }
+
+  await refreshPrivateDemoState()
+}
+
+async function updateShow(id, action) {
+  const show = shows.find(item => item.id === id)
+
+  if (!show) {
+    return
+  }
+
+  try {
+    if (action === 'watched') {
+      await recordPrivateWatch(show)
+    }
+
+    if (action === 'liked' || action === 'disliked') {
+      await recordPrivateReaction(show, action)
+    }
+
+    if (action === 'saved') {
+      const state = loadDemoUiState()
+      const showState = ensureDemoShowState(
+        state,
+        id,
+        show.workflowStatus
+      )
+
+      showState.saved = !showState.saved
+      saveDemoUiState(state)
+    }
+
+    render()
+  } catch (error) {
+    privateDemoState = {
+      ...privateDemoState,
+      status: 'error',
+      error
+    }
+
+    render()
+  }
 }
 
 function buttonClass(active) {
@@ -91,6 +260,9 @@ function createCard(show, state) {
     show.id,
     show.workflowStatus
   )
+  const watched = privateDemoState.watchedTitleIds.has(show.id)
+  const reaction = privateDemoState.reactionsByTitle.get(show.id)?.reaction
+  const privateStoreUnavailable = privateDemoState.status !== 'ready'
 
   return `
     <article class="show-card">
@@ -123,27 +295,30 @@ function createCard(show, state) {
         <div class="actions">
 
           <button
-            class="${buttonClass(showState.watched)}"
+            class="${buttonClass(watched)}"
             data-id="${show.id}"
             data-action="watched"
+            ${privateStoreUnavailable || watched ? 'disabled' : ''}
           >
-            ${showState.watched ? '✓ Watched' : 'Watched'}
+            ${watched ? '✓ Watched' : 'Watched'}
           </button>
 
           <button
-            class="${buttonClass(showState.rating === 'liked')}"
+            class="${buttonClass(reaction === 'liked')}"
             data-id="${show.id}"
             data-action="liked"
+            ${privateStoreUnavailable || reaction === 'liked' ? 'disabled' : ''}
           >
-            ${showState.rating === 'liked' ? '✓ Liked' : 'Liked'}
+            ${reaction === 'liked' ? '✓ Liked' : 'Liked'}
           </button>
 
           <button
-            class="${buttonClass(showState.rating === 'disliked')}"
+            class="${buttonClass(reaction === 'disliked')}"
             data-id="${show.id}"
             data-action="disliked"
+            ${privateStoreUnavailable || reaction === 'disliked' ? 'disabled' : ''}
           >
-            ${showState.rating === 'disliked'
+            ${reaction === 'disliked'
               ? '✓ Not for us'
               : 'Not for us'}
           </button>
@@ -164,21 +339,14 @@ function createCard(show, state) {
 }
 
 function getRecentlyWatched(state) {
-  return shows.filter(show => state[show.id]?.watched)
+  return shows.filter(show => privateDemoState.watchedTitleIds.has(show.id))
 }
 
-function createRecentItem(show, state) {
-  const showState = ensureDemoShowState(state, show.id)
-
-  let result = 'Not rated yet'
-
-  if (showState.rating === 'liked') {
-    result = 'Liked'
-  }
-
-  if (showState.rating === 'disliked') {
-    result = 'Not for us'
-  }
+function createRecentItem(show) {
+  const reaction = privateDemoState.reactionsByTitle.get(show.id)?.reaction
+  const result = reaction
+    ? `${reaction.charAt(0).toUpperCase()}${reaction.slice(1)}`
+    : 'No explicit reaction yet'
 
   return `
     <div class="recent-item">
@@ -187,13 +355,7 @@ function createRecentItem(show, state) {
         <span>${result}</span>
       </div>
 
-      <button
-        class="small-button"
-        data-id="${show.id}"
-        data-action="watched"
-      >
-        Undo watched
-      </button>
+      <span>Recorded privately for Viewer 1</span>
     </div>
   `
 }
@@ -201,6 +363,11 @@ function createRecentItem(show, state) {
 function render() {
   const state = loadDemoUiState()
   const recentlyWatched = getRecentlyWatched(state)
+  const privateDemoStatus = privateDemoState.status === 'loading'
+    ? 'Private demo storage is loading.'
+    : privateDemoState.status === 'error'
+      ? 'Private demo storage is unavailable in this browser.'
+      : `Private storage confirmed for Viewer 1: ${recentlyWatched.length} watched title${recentlyWatched.length === 1 ? '' : 's'} and ${privateDemoState.reactionsByTitle.size} reaction${privateDemoState.reactionsByTitle.size === 1 ? '' : 's'} reloaded from IndexedDB.`
 
   document.querySelector('#app').innerHTML = `
     <main class="app-shell">
@@ -209,6 +376,7 @@ function render() {
         <div>
           <h1>TV Recommendations</h1>
           <p>What should we watch next?</p>
+          <p>${privateDemoStatus}</p>
         </div>
 
         <div class="app-badge">
@@ -229,14 +397,14 @@ function render() {
 
         <div class="section-heading">
           <h2>Recently watched</h2>
-          <p>Demo-only selections stored in this browser; not canonical history.</p>
+          <p>Synthetic private history recorded for Viewer 1 in this browser.</p>
         </div>
 
         <div class="recent-list">
           ${
             recentlyWatched.length
               ? recentlyWatched
-                  .map(show => createRecentItem(show, state))
+                  .map(show => createRecentItem(show))
                   .join('')
               : `
                 <div class="empty-message">
@@ -252,8 +420,8 @@ function render() {
   `
 
   document.querySelectorAll('[data-action]').forEach(button => {
-    button.addEventListener('click', () => {
-      updateShow(
+    button.addEventListener('click', async () => {
+      await updateShow(
         button.dataset.id,
         button.dataset.action
       )
@@ -262,3 +430,4 @@ function render() {
 }
 
 render()
+initializePrivateDemo()
