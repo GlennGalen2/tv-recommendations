@@ -204,6 +204,10 @@ button {
   color: #d9dee6;
 }
 
+.backup-file-label {
+  margin-top: 18px;
+}
+
 .import-panel select,
 .import-panel input {
   display: block;
@@ -231,6 +235,10 @@ button {
 
 .import-error {
   color: #ffb4b4;
+}
+
+.restore-warning {
+  color: #ffcf86;
 }
 
 .recent-list {

@@ -1,6 +1,8 @@
 const DATABASE_NAME = 'tv-recommendations-private'
 const DATABASE_VERSION = 1
 const RECORD_SCHEMA_VERSION = 1
+export const PRIVATE_BACKUP_FORMAT = 'tv-recommendations-private-backup'
+export const PRIVATE_BACKUP_FORMAT_VERSION = 1
 
 export const PRIVATE_STORES = Object.freeze({
   metadata: 'metadata',
@@ -24,6 +26,9 @@ const RECORD_STORES = new Set([
   PRIVATE_STORES.preferenceEvidence,
   PRIVATE_STORES.recommendations
 ])
+
+const BACKUP_STORES = Object.freeze(Object.values(PRIVATE_STORES))
+const PRIVATE_STORE_NAMES = new Set(BACKUP_STORES)
 
 const IMMUTABLE_STORES = new Set([
   PRIVATE_STORES.historyEvents,
@@ -63,7 +68,7 @@ function requireIndexedDb() {
 }
 
 function requireStoreName(storeName) {
-  if (!RECORD_STORES.has(storeName)) {
+  if (!PRIVATE_STORE_NAMES.has(storeName)) {
     throw new Error(`Unknown private record store: ${storeName}`)
   }
 }
@@ -421,16 +426,172 @@ export async function supersedeReaction(reaction) {
 export async function exportPrivateBackup() {
   const records = {}
 
-  for (const storeName of RECORD_STORES) {
+  for (const storeName of BACKUP_STORES) {
     records[storeName] = await listPrivateRecords(storeName)
   }
 
+  return createPrivateBackup(records)
+}
+
+function validateMetadataRecord(record) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) {
+    throw new TypeError('metadata records must be objects.')
+  }
+
+  if (typeof record.key !== 'string' || !record.key.trim()) {
+    throw new TypeError('metadata records require a non-empty key.')
+  }
+}
+
+function validateBackupRecords(records) {
+  if (!records || typeof records !== 'object' || Array.isArray(records)) {
+    throw new TypeError('Backup records must be an object.')
+  }
+
+  for (const storeName of BACKUP_STORES) {
+    if (!Array.isArray(records[storeName])) {
+      throw new TypeError(`Backup ${storeName} records must be an array.`)
+    }
+
+    const identities = new Set()
+    for (const record of records[storeName]) {
+      if (storeName === PRIVATE_STORES.metadata) {
+        validateMetadataRecord(record)
+      } else {
+        requireRecord(record, storeName)
+      }
+
+      if (storeName === PRIVATE_STORES.reactions) {
+        requireReaction(record)
+      }
+
+      if (storeName === PRIVATE_STORES.importBatches) {
+        rejectRawImportPayload(record)
+      }
+
+      const identity = storeName === PRIVATE_STORES.metadata ? record.key : record.id
+      if (identities.has(identity)) {
+        throw new TypeError(`Backup ${storeName} contains duplicate records.`)
+      }
+      identities.add(identity)
+    }
+  }
+}
+
+function backupCounts(records) {
+  return Object.fromEntries(
+    BACKUP_STORES.map(storeName => [storeName, records[storeName].length])
+  )
+}
+
+export function createPrivateBackup(records, exportedAt = new Date().toISOString()) {
+  validateBackupRecords(records)
+
   return {
-    format: 'tv-recommendations-private-backup',
-    formatVersion: 1,
-    exportedAt: new Date().toISOString(),
+    format: PRIVATE_BACKUP_FORMAT,
+    formatVersion: PRIVATE_BACKUP_FORMAT_VERSION,
+    exportedAt,
     databaseVersion: DATABASE_VERSION,
     recordSchemaVersion: RECORD_SCHEMA_VERSION,
+    recordCounts: backupCounts(records),
     records
+  }
+}
+
+export function validatePrivateBackup(backup) {
+  const problems = []
+
+  if (!backup || typeof backup !== 'object' || Array.isArray(backup)) {
+    problems.push('Backup must be a JSON object.')
+  } else {
+    if (backup.format !== PRIVATE_BACKUP_FORMAT) {
+      problems.push('Backup format marker is not recognized.')
+    }
+    if (backup.formatVersion !== PRIVATE_BACKUP_FORMAT_VERSION) {
+      problems.push('Backup format version is incompatible.')
+    }
+    if (backup.databaseVersion !== DATABASE_VERSION) {
+      problems.push('Backup database schema version is incompatible.')
+    }
+    if (backup.recordSchemaVersion !== RECORD_SCHEMA_VERSION) {
+      problems.push('Backup record schema version is incompatible.')
+    }
+    if (typeof backup.exportedAt !== 'string' || Number.isNaN(Date.parse(backup.exportedAt))) {
+      problems.push('Backup export timestamp is invalid.')
+    }
+
+    try {
+      validateBackupRecords(backup.records)
+      const expectedCounts = backupCounts(backup.records)
+      if (!backup.recordCounts || typeof backup.recordCounts !== 'object') {
+        problems.push('Backup record counts are missing.')
+      } else if (BACKUP_STORES.some(storeName => backup.recordCounts[storeName] !== expectedCounts[storeName])) {
+        problems.push('Backup record counts do not match its records.')
+      }
+    } catch {
+      problems.push('Backup records do not meet the private data contract.')
+    }
+  }
+
+  return {
+    valid: problems.length === 0,
+    problems,
+    preview: backup && typeof backup === 'object' && !Array.isArray(backup)
+      ? {
+          exportedAt: backup.exportedAt || null,
+          databaseVersion: backup.databaseVersion ?? null,
+          recordSchemaVersion: backup.recordSchemaVersion ?? null,
+          recordCounts: backup.recordCounts || null
+        }
+      : null
+  }
+}
+
+export function inspectPrivateBackupJson(jsonText) {
+  let backup
+  try {
+    backup = JSON.parse(jsonText)
+  } catch {
+    throw new Error('The selected file is not valid JSON.')
+  }
+
+  return { backup, validation: validatePrivateBackup(backup) }
+}
+
+export function parsePrivateBackupJson(jsonText) {
+  const { backup, validation } = inspectPrivateBackupJson(jsonText)
+  if (!validation.valid) {
+    throw new Error('The selected file is not a compatible private-data backup.')
+  }
+
+  return { backup, validation }
+}
+
+export async function restorePrivateBackup(backup, { database: providedDatabase } = {}) {
+  const validation = validatePrivateBackup(backup)
+  if (!validation.valid) {
+    throw new Error('Private backup validation failed; current data was not changed.')
+  }
+
+  const database = providedDatabase || await openPrivateStore()
+  const transaction = database.transaction(BACKUP_STORES, 'readwrite')
+  const completion = transactionAsPromise(transaction)
+
+  for (const storeName of BACKUP_STORES) {
+    transaction.objectStore(storeName).clear()
+  }
+
+  for (const storeName of BACKUP_STORES) {
+    const store = transaction.objectStore(storeName)
+    for (const record of backup.records[storeName]) {
+      store.add(record)
+    }
+  }
+
+  await completion
+
+  return {
+    restoredAt: new Date().toISOString(),
+    recordCounts: backupCounts(backup.records)
   }
 }

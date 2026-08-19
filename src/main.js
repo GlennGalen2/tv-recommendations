@@ -12,6 +12,7 @@ import {
   supersedeReaction
 } from './data/privateStore.js'
 import { createNetflixImportPanel } from './ui/netflixImportPanel.js'
+import { createPrivateBackupPanel } from './ui/privateBackupPanel.js'
 
 const titlesById = new Map(
   catalog.titles.map(title => [title.id, title])
@@ -30,6 +31,11 @@ let privateDemoState = {
 const netflixImportPanel = createNetflixImportPanel({
   requestRender: render,
   onImportComplete: refreshPrivateDemoState
+})
+
+const privateBackupPanel = createPrivateBackupPanel({
+  requestRender: render,
+  onRestoreComplete: refreshPrivateDemoState
 })
 
 const shows = recommendationData.recommendations.map(recommendation => {
@@ -401,6 +407,8 @@ function render() {
 
       ${netflixImportPanel.render(privateDemoState.status === 'ready')}
 
+      ${privateBackupPanel.render(privateDemoState.status === 'ready')}
+
       <section class="recent-section">
 
         <div class="section-heading">
@@ -437,6 +445,7 @@ function render() {
   })
 
   netflixImportPanel.bind(privateDemoState.status === 'ready')
+  privateBackupPanel.bind(privateDemoState.status === 'ready')
 }
 
 render()

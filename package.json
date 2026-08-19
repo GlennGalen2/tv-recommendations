@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "validate:data": "node scripts/validate-data.js",
     "validate:private-store": "node --check src/data/privateStore.js",
-    "test:netflix-importer": "node tests/netflixViewingHistory.test.js"
+    "test:netflix-importer": "node tests/netflixViewingHistory.test.js",
+    "test:private-backup": "node tests/privateBackup.test.js"
   },
   "devDependencies": {
     "vite": "^8.2.0",
