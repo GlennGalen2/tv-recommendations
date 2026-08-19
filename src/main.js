@@ -20,6 +20,8 @@ import { createIdentityResolutionPanel } from './ui/identityResolutionPanel.js'
 import { createTmdbCredentialPanel } from './ui/tmdbCredentialPanel.js'
 import { createPreferencePanel } from './ui/preferencePanel.js'
 import { createRecommendationEnginePanel } from './ui/recommendationEnginePanel.js'
+import { createCuratedAnchorResolutionPanel } from './ui/curatedAnchorResolutionPanel.js'
+import { createDiscoveredRecommendationsPanel } from './ui/discoveredRecommendationsPanel.js'
 
 const titlesById = new Map(
   catalog.titles.map(title => [title.id, title])
@@ -65,6 +67,11 @@ const preferencePanel = createPreferencePanel({
 })
 const tmdbCredentialPanel = createTmdbCredentialPanel({ requestRender: render })
 const recommendationEnginePanel = createRecommendationEnginePanel({ requestRender: render })
+const curatedAnchorResolutionPanel = createCuratedAnchorResolutionPanel({
+  requestRender: render,
+  onIdentityResolutionChanged: () => Promise.all([viewingAnalysisPanel.refresh(), recommendationEnginePanel.refresh(), identityResolutionPanel.refresh()])
+})
+const discoveredRecommendationsPanel = createDiscoveredRecommendationsPanel({ requestRender: render })
 
 const shows = recommendationData.recommendations.map(recommendation => {
   const title = titlesById.get(recommendation.titleId)
@@ -457,9 +464,13 @@ function render() {
 
       ${identityResolutionPanel.render(privateDemoState.status === 'ready')}
 
+      ${curatedAnchorResolutionPanel.render(privateDemoState.status === 'ready')}
+
       ${preferencePanel.render(privateDemoState.status === 'ready')}
 
       ${recommendationEnginePanel.render(privateDemoState.status === 'ready')}
+
+      ${discoveredRecommendationsPanel.render(privateDemoState.status === 'ready')}
 
       ${tmdbCredentialPanel.render(privateDemoState.status === 'ready')}
 
@@ -504,8 +515,10 @@ function render() {
   viewingAnalysisPanel.bind(privateDemoState.status === 'ready')
   importBatchMaintenancePanel.bind(privateDemoState.status === 'ready')
   identityResolutionPanel.bind(privateDemoState.status === 'ready')
+  curatedAnchorResolutionPanel.bind(privateDemoState.status === 'ready')
   preferencePanel.bind(privateDemoState.status === 'ready')
   recommendationEnginePanel.bind(privateDemoState.status === 'ready')
+  discoveredRecommendationsPanel.bind(privateDemoState.status === 'ready')
   tmdbCredentialPanel.bind(privateDemoState.status === 'ready')
 }
 

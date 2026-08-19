@@ -248,7 +248,7 @@ function summarizeEvaluation(results) {
   }
 }
 
-async function evaluateRecord(record, searchCandidates) {
+export async function evaluateTmdbIdentityRecord(record, searchCandidates = searchTmdbCandidates) {
   const lookupTitle = { ...record.title, title: record.searchTitle, originalTitle: record.searchTitle, type: record.lookupNormalization.mediaTypeHint || record.title.type }
   const query = createIdentityMatchQuery(lookupTitle, record.events)
   try {
@@ -284,7 +284,7 @@ export async function runTmdbMatchingEvaluationFromRecords(records, {
 
   const results = []
   for (const record of selected) {
-    results.push(await evaluateRecord(record, searchCandidates))
+    results.push(await evaluateTmdbIdentityRecord(record, searchCandidates))
   }
 
   return { results, ...summarizeEvaluation(results) }
@@ -309,7 +309,7 @@ export async function runTmdbIdentityReviewQueueFromRecords(records, {
 
   for (let index = 0; index < eligible.length; index += 1) {
     if (index > 0 && throttleMs > 0) await pause(throttleMs)
-    const result = await evaluateRecord(eligible[index], searchCandidates)
+    const result = await evaluateTmdbIdentityRecord(eligible[index], searchCandidates)
     if (result.errorStatus === 429) {
       pendingTitleIds = eligible.slice(index).map(record => record.title.id)
       haltedReason = 'TMDb rate-limited the queue. Retry the remaining records later.'

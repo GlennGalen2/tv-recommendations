@@ -20,6 +20,9 @@
     "test:tmdb-client": "node tests/tmdbClient.test.js",
     "test:tmdb-pilot": "node tests/tmdbMatchingPilot.test.js",
     "test:identity-review-queue": "node tests/identityReviewQueue.test.js",
+    "test:curated-anchor-resolution": "node tests/curatedAnchorResolution.test.js",
+    "test:tmdb-discovery": "node tests/tmdbDiscovery.test.js",
+    "test:candidate-enrichment": "node tests/candidateEnrichment.test.js",
     "test:private-preferences": "node tests/privatePreferences.test.js",
     "test:recommendation-engine": "node tests/recommendationEngine.test.js"
   },

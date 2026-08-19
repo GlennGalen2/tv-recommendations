@@ -3,10 +3,10 @@ import { derivePrivatePreferenceAnalysis } from './privatePreferences.js'
 import { deriveRecommendations } from './recommendationEngine.js'
 
 const DATABASE_NAME = 'tv-recommendations-private'
-const DATABASE_VERSION = 2
+const DATABASE_VERSION = 3
 const RECORD_SCHEMA_VERSION = 1
 export const PRIVATE_BACKUP_FORMAT = 'tv-recommendations-private-backup'
-export const PRIVATE_BACKUP_FORMAT_VERSION = 2
+export const PRIVATE_BACKUP_FORMAT_VERSION = 3
 
 export const PRIVATE_STORES = Object.freeze({
   metadata: 'metadata',
@@ -18,7 +18,8 @@ export const PRIVATE_STORES = Object.freeze({
   reactions: 'reactions',
   preferenceEvidence: 'preferenceEvidence',
   recommendations: 'recommendations',
-  identityResolutions: 'identityResolutions'
+  identityResolutions: 'identityResolutions',
+  candidateEvidence: 'candidateEvidence'
 })
 
 const RECORD_STORES = new Set([
@@ -39,7 +40,8 @@ const PRIVATE_STORE_NAMES = new Set(BACKUP_STORES)
 const IMMUTABLE_STORES = new Set([
   PRIVATE_STORES.historyEvents,
   PRIVATE_STORES.reactions,
-  PRIVATE_STORES.identityResolutions
+  PRIVATE_STORES.identityResolutions,
+  PRIVATE_STORES.candidateEvidence
 ])
 
 const REACTION_VALUES = new Set([
@@ -188,6 +190,10 @@ function createObjectStores(database, upgradeTransaction) {
   createStore(database, upgradeTransaction, PRIVATE_STORES.identityResolutions, { keyPath: 'id' }, [
     { name: 'by-source-title', keyPath: 'sourceTitleId' },
     { name: 'by-status', keyPath: 'status' },
+    { name: 'by-recorded-at', keyPath: 'recordedAt' }
+  ])
+  createStore(database, upgradeTransaction, PRIVATE_STORES.candidateEvidence, { keyPath: 'id' }, [
+    { name: 'by-target', keyPath: ['target.provider', 'target.mediaType', 'target.externalId'] },
     { name: 'by-recorded-at', keyPath: 'recordedAt' }
   ])
 }
@@ -358,6 +364,29 @@ function requireIdentityResolution(record) {
   }
 }
 
+function requireCandidateEvidence(record) {
+  const target = record.target
+  if (!target || target.provider !== 'tmdb' || typeof target.externalId !== 'string' || !target.externalId.trim() || !['movie', 'tv'].includes(target.mediaType)) {
+    throw new TypeError('Candidate evidence requires a stable TMDb movie or TV target.')
+  }
+  if (!Array.isArray(record.attributes) || !record.attributes.length) {
+    throw new TypeError('Candidate evidence requires at least one qualitative attribute.')
+  }
+  for (const attribute of record.attributes) {
+    if (!attribute || typeof attribute.attribute !== 'string' || !attribute.attribute.trim() || !['present', 'absent'].includes(attribute.direction)
+      || !Number.isFinite(attribute.value) || attribute.value < 0 || attribute.value > 1
+      || !Number.isFinite(attribute.confidence) || attribute.confidence < 0 || attribute.confidence > 1
+      || !Array.isArray(attribute.mechanisms) || attribute.mechanisms.some(value => typeof value !== 'string' || !value.trim())
+      || typeof attribute.source !== 'string' || !attribute.source.trim()
+      || typeof attribute.rationale !== 'string' || !attribute.rationale.trim()) {
+      throw new TypeError('Candidate evidence attributes require a name, direction, value, confidence, mechanisms, source, and rationale.')
+    }
+  }
+  if (typeof record.recordedAt !== 'string' || Number.isNaN(Date.parse(record.recordedAt))) {
+    throw new TypeError('Candidate evidence requires a recordedAt timestamp.')
+  }
+}
+
 export async function createIdentityResolution(record, { database: providedDatabase } = {}) {
   requireRecord(record, PRIVATE_STORES.identityResolutions)
   requireIdentityResolution(record)
@@ -374,6 +403,24 @@ export async function createIdentityResolution(record, { database: providedDatab
   }
   const transaction = database.transaction(PRIVATE_STORES.identityResolutions, 'readwrite')
   transaction.objectStore(PRIVATE_STORES.identityResolutions).add(record)
+  await transactionAsPromise(transaction)
+  return record.id
+}
+
+export async function createCandidateEvidence(record, { database: providedDatabase } = {}) {
+  requireRecord(record, PRIVATE_STORES.candidateEvidence)
+  requireCandidateEvidence(record)
+  const database = providedDatabase || await openPrivateStore()
+  if (record.supersedesEvidenceId) {
+    const transaction = database.transaction(PRIVATE_STORES.candidateEvidence, 'readonly')
+    const previous = await requestAsPromise(transaction.objectStore(PRIVATE_STORES.candidateEvidence).get(record.supersedesEvidenceId))
+    await transactionAsPromise(transaction)
+    if (!previous || previous.target.provider !== record.target.provider || previous.target.mediaType !== record.target.mediaType || previous.target.externalId !== record.target.externalId) {
+      throw new Error('Candidate evidence can only supersede evidence for the same TMDb target.')
+    }
+  }
+  const transaction = database.transaction(PRIVATE_STORES.candidateEvidence, 'readwrite')
+  transaction.objectStore(PRIVATE_STORES.candidateEvidence).add(record)
   await transactionAsPromise(transaction)
   return record.id
 }
@@ -792,6 +839,35 @@ export async function commitExplicitPreferenceImport(input) {
   return { imported, skipped, importedTitles }
 }
 
+export async function commitCandidateEvidenceImport(records) {
+  if (!Array.isArray(records) || !records.length) throw new TypeError('At least one candidate-evidence record is required.')
+  for (const record of records) {
+    requireRecord(record, PRIVATE_STORES.candidateEvidence)
+    requireCandidateEvidence(record)
+  }
+  const database = await openPrivateStore()
+  const transaction = database.transaction(PRIVATE_STORES.candidateEvidence, 'readwrite')
+  const store = transaction.objectStore(PRIVATE_STORES.candidateEvidence)
+  const existing = await requestAsPromise(store.getAll())
+  const known = new Map(existing.map(record => [record.id, record]))
+  let imported = 0
+  let skipped = 0
+  for (const record of records) {
+    if (known.has(record.id)) { skipped += 1; continue }
+    if (record.supersedesEvidenceId) {
+      const previous = known.get(record.supersedesEvidenceId)
+      if (!previous || previous.target.provider !== record.target.provider || previous.target.mediaType !== record.target.mediaType || previous.target.externalId !== record.target.externalId) {
+        throw new Error('Imported candidate evidence can only supersede the same TMDb target.')
+      }
+    }
+    store.add(record)
+    known.set(record.id, record)
+    imported += 1
+  }
+  await transactionAsPromise(transaction)
+  return { imported, skipped }
+}
+
 export async function exportPrivateBackup() {
   const records = {}
 
@@ -834,6 +910,10 @@ function validateBackupRecords(records) {
         requireReaction(record)
       }
 
+      if (storeName === PRIVATE_STORES.candidateEvidence) {
+        requireCandidateEvidence(record)
+      }
+
       if (storeName === PRIVATE_STORES.importBatches) {
         rejectRawImportPayload(record)
       }
@@ -851,6 +931,9 @@ function normalizedBackupRecords(backup) {
   const records = structuredClone(backup.records)
   if (backup.formatVersion === 1 && !Array.isArray(records[PRIVATE_STORES.identityResolutions])) {
     records[PRIVATE_STORES.identityResolutions] = []
+  }
+  if (backup.formatVersion <= 2 && !Array.isArray(records[PRIVATE_STORES.candidateEvidence])) {
+    records[PRIVATE_STORES.candidateEvidence] = []
   }
   return records
 }
@@ -884,10 +967,10 @@ export function validatePrivateBackup(backup) {
     if (backup.format !== PRIVATE_BACKUP_FORMAT) {
       problems.push('Backup format marker is not recognized.')
     }
-    if (![1, PRIVATE_BACKUP_FORMAT_VERSION].includes(backup.formatVersion)) {
+    if (![1, 2, PRIVATE_BACKUP_FORMAT_VERSION].includes(backup.formatVersion)) {
       problems.push('Backup format version is incompatible.')
     }
-    if (![1, DATABASE_VERSION].includes(backup.databaseVersion)) {
+    if (![1, 2, DATABASE_VERSION].includes(backup.databaseVersion)) {
       problems.push('Backup database schema version is incompatible.')
     }
     if (backup.recordSchemaVersion !== RECORD_SCHEMA_VERSION) {
@@ -904,7 +987,7 @@ export function validatePrivateBackup(backup) {
       if (!backup.recordCounts || typeof backup.recordCounts !== 'object') {
         problems.push('Backup record counts are missing.')
       } else if (Object.entries(backup.recordCounts).some(([storeName, count]) => expectedCounts[storeName] !== count)
-        || (backup.formatVersion !== 1 && BACKUP_STORES.some(storeName => backup.recordCounts[storeName] !== expectedCounts[storeName]))) {
+        || (backup.formatVersion === PRIVATE_BACKUP_FORMAT_VERSION && BACKUP_STORES.some(storeName => backup.recordCounts[storeName] !== expectedCounts[storeName]))) {
         problems.push('Backup record counts do not match its records.')
       }
     } catch {

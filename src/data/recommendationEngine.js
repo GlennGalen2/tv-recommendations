@@ -2,6 +2,7 @@ import { deriveBehavioralPreferenceEvidence } from './privatePreferences.js'
 
 export const REACTION_WEIGHTS = Object.freeze({ loved: 1, liked: 0.65, okay: 0.05, disliked: -0.7, abandoned: -1, unknown: 0 })
 export const BEHAVIORAL_WEIGHTS = Object.freeze({ completed_available_run: 0.35, near_complete: 0.25, substantial_viewing: 0.15, repeat_viewing: 0.18, early_abandonment: -0.25, availability_uncertain: 0 })
+export const CANDIDATE_EVIDENCE_WEIGHT = 22
 
 function clamp(value, minimum = 0, maximum = 100) { return Math.min(maximum, Math.max(minimum, value)) }
 function latestReactions(reactions) {
@@ -48,11 +49,40 @@ function scoreMechanisms(title, learnedWeights) {
   return { value: clamp(values.reduce((sum, item) => sum + item.value, 0) / magnitude, -1, 1), reasons: values.sort((left, right) => Math.abs(right.value) - Math.abs(left.value)).slice(0, 2) }
 }
 
-function scoreViewer({ title, viewerId, otherViewerId, reactionsByKey, behavioral, learnedWeights }) {
+function candidateEvidenceKey(title) {
+  const mediaType = title.type === 'series' || title.mediaType === 'tv' ? 'tv' : title.type === 'movie' || title.mediaType === 'movie' ? 'movie' : null
+  const externalId = title.externalIds?.tmdb || title.externalId || null
+  return mediaType && externalId ? `tmdb:${mediaType}:${externalId}` : null
+}
+
+function currentCandidateEvidence(records = []) {
+  const superseded = new Set(records.map(record => record.supersedesEvidenceId).filter(Boolean))
+  return records.filter(record => !superseded.has(record.id))
+}
+
+function scoreCandidateEvidence(title, learnedWeights, records = []) {
+  const key = candidateEvidenceKey(title)
+  const record = key && currentCandidateEvidence(records).find(candidate => `${candidate.target?.provider}:${candidate.target?.mediaType}:${candidate.target?.externalId}` === key)
+  if (!record) return { value: 0, confidence: 0, reasons: [], evidenceId: null }
+  const values = record.attributes.map(attribute => {
+    const mechanismValue = attribute.mechanisms.reduce((sum, mechanism) => sum + (learnedWeights.get(mechanism) || 0), 0) / attribute.mechanisms.length
+    return { attribute, value: mechanismValue * attribute.value * attribute.confidence * (attribute.direction === 'absent' ? -1 : 1) }
+  }).filter(item => item.value)
+  const magnitude = [...learnedWeights.values()].reduce((sum, value) => sum + Math.abs(value), 0) || 1
+  return {
+    value: clamp(values.reduce((sum, item) => sum + item.value, 0) / magnitude, -1, 1),
+    confidence: Math.max(...record.attributes.map(attribute => attribute.confidence), 0),
+    reasons: values.sort((left, right) => Math.abs(right.value) - Math.abs(left.value)).slice(0, 2),
+    evidenceId: record.id
+  }
+}
+
+function scoreViewer({ title, viewerId, otherViewerId, reactionsByKey, behavioral, learnedWeights, candidateEvidence = [] }) {
   const explicit = reactionsByKey.get(`${viewerId}:${title.id}`)
   const behavior = behavioral.get(`${viewerId}:${title.id}`) || []
   const otherExplicit = reactionsByKey.get(`${otherViewerId}:${title.id}`)
   const mechanism = scoreMechanisms(title, learnedWeights)
+  const curatedCandidateEvidence = scoreCandidateEvidence(title, learnedWeights, candidateEvidence)
   const reasons = []
   let delta = 0
   let confidence = 0.15
@@ -79,16 +109,22 @@ function scoreViewer({ title, viewerId, otherViewerId, reactionsByKey, behaviora
   }
 
   if (mechanism.value) {
-    delta += mechanism.value * 22
+    delta += mechanism.value * CANDIDATE_EVIDENCE_WEIGHT
     confidence = Math.max(confidence, 0.5)
     const top = mechanism.reasons[0]
     reasons.push(`${top.value > 0 ? 'Fits' : 'Conflicts with'} the ${top.name.replaceAll('-', ' ')} preference anchor.`)
+  }
+  if (curatedCandidateEvidence.value) {
+    delta += curatedCandidateEvidence.value * CANDIDATE_EVIDENCE_WEIGHT
+    confidence = Math.max(confidence, curatedCandidateEvidence.confidence * 0.7)
+    const top = curatedCandidateEvidence.reasons[0]
+    reasons.push(`${top.value > 0 ? 'Curated candidate evidence fits' : 'Curated candidate evidence conflicts with'} ${top.attribute.attribute.replaceAll('-', ' ')} (${top.attribute.source}): ${top.attribute.rationale}`)
   }
   if (explicit && behavior.some(record => (REACTION_WEIGHTS[explicit.reaction] > 0 && BEHAVIORAL_WEIGHTS[record.signal] < 0) || (REACTION_WEIGHTS[explicit.reaction] < 0 && BEHAVIORAL_WEIGHTS[record.signal] > 0))) {
     reasons.push('Contradictory behavioral evidence is retained but does not override the explicit reaction.')
   }
   if (!reasons.length) reasons.push('No direct preference evidence yet; this is neutral rather than a negative inference.')
-  return { viewerId, score: Math.round(clamp(50 + delta)), confidence: Math.round(confidence * 100) / 100, reasons, explicitReaction: explicit?.reaction || null }
+  return { viewerId, score: Math.round(clamp(50 + delta)), confidence: Math.round(confidence * 100) / 100, reasons, explicitReaction: explicit?.reaction || null, candidateEvidenceId: curatedCandidateEvidence.evidenceId }
 }
 
 export function jointScore(viewerOne, viewerTwo) {
@@ -101,14 +137,14 @@ export function jointScore(viewerOne, viewerTwo) {
   return { value, disagreement, explanation }
 }
 
-export function scoreRecommendationCandidate({ title, viewerId, otherViewerId, titles = [], events = [], reactions = [], resolutions = [], behavioralEvidence = null }) {
+export function scoreRecommendationCandidate({ title, viewerId, otherViewerId, titles = [], events = [], reactions = [], resolutions = [], behavioralEvidence = null, candidateEvidence = [] }) {
   const currentReactions = latestReactions(reactions)
   const reactionsByKey = new Map(currentReactions.map(record => [`${record.viewerId}:${record.titleId}`, record]))
   const behavioral = behavioralByViewerTitle(events, titles, resolutions, behavioralEvidence)
-  return scoreViewer({ title, viewerId, otherViewerId, reactionsByKey, behavioral, learnedWeights: learnMechanismWeights(currentReactions, viewerId) })
+  return scoreViewer({ title, viewerId, otherViewerId, reactionsByKey, behavioral, learnedWeights: learnMechanismWeights(currentReactions, viewerId), candidateEvidence })
 }
 
-export function deriveRecommendations({ titles = [], events = [], reactions = [], resolutions = [], behavioralEvidence = null, viewerIds = ['viewer-1', 'viewer-2'] }) {
+export function deriveRecommendations({ titles = [], events = [], reactions = [], resolutions = [], behavioralEvidence = null, candidateEvidence = [], viewerIds = ['viewer-1', 'viewer-2'] }) {
   const [viewerOne, viewerTwo] = viewerIds
   const currentReactions = latestReactions(reactions)
   const reactionsByKey = new Map(currentReactions.map(record => [`${record.viewerId}:${record.titleId}`, record]))
@@ -116,8 +152,8 @@ export function deriveRecommendations({ titles = [], events = [], reactions = []
   const weights = new Map(viewerIds.map(viewerId => [viewerId, learnMechanismWeights(currentReactions, viewerId)]))
   const watched = new Map(viewerIds.map(viewerId => [viewerId, watchedIds(events, viewerId)]))
   const all = titles.filter(title => title?.id && title.title).map(title => {
-    const viewerOneScore = scoreViewer({ title, viewerId: viewerOne, otherViewerId: viewerTwo, reactionsByKey, behavioral, learnedWeights: weights.get(viewerOne) })
-    const viewerTwoScore = scoreViewer({ title, viewerId: viewerTwo, otherViewerId: viewerOne, reactionsByKey, behavioral, learnedWeights: weights.get(viewerTwo) })
+    const viewerOneScore = scoreViewer({ title, viewerId: viewerOne, otherViewerId: viewerTwo, reactionsByKey, behavioral, learnedWeights: weights.get(viewerOne), candidateEvidence })
+    const viewerTwoScore = scoreViewer({ title, viewerId: viewerTwo, otherViewerId: viewerOne, reactionsByKey, behavioral, learnedWeights: weights.get(viewerTwo), candidateEvidence })
     const joint = jointScore(viewerOneScore, viewerTwoScore)
     return { titleId: title.id, title: title.title, mediaType: title.type || 'unknown', canonical: title.externalIds?.tmdb ? `tmdb:${title.externalIds.tmdb}` : null, watchedBy: Object.fromEntries(viewerIds.map(viewerId => [viewerId, watched.get(viewerId).has(title.id)])), viewerScores: [viewerOneScore, viewerTwoScore], joint, explanation: [...viewerOneScore.reasons, ...viewerTwoScore.reasons, joint.explanation].slice(0, 3) }
   })

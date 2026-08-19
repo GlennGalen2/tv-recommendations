@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {
   PRIVATE_BACKUP_FORMAT,
+  PRIVATE_BACKUP_FORMAT_VERSION,
   PRIVATE_STORES,
   createPrivateBackup,
   inspectPrivateBackupJson,
@@ -28,6 +29,13 @@ function syntheticRecords() {
   })
   records.preferenceEvidence.push({ id: 'evidence_synthetic', schemaVersion: 1, viewerId: 'viewer-1' })
   records.recommendations.push({ id: 'rec_synthetic', schemaVersion: 1, titleId: 'title:synthetic-film' })
+  records.candidateEvidence.push({
+    id: 'candidate-evidence_synthetic', schemaVersion: 1,
+    target: { provider: 'tmdb', externalId: '101', mediaType: 'movie' },
+    attributes: [{ attribute: 'synthetic-quality', direction: 'present', value: 0.8, confidence: 0.8, mechanisms: ['synthetic-quality'], source: 'synthetic-human-curation', rationale: 'Synthetic backup validation evidence.' }],
+    recordedAt: '2026-08-19T12:00:00.000Z', supersedesEvidenceId: null,
+    provenance: { sourceId: 'source:manual', importFormat: 'candidate-enrichment:v1' }
+  })
   return records
 }
 
@@ -78,6 +86,7 @@ const backup = createPrivateBackup(records, '2026-08-19T12:00:00.000Z')
 
 assert.equal(backup.format, PRIVATE_BACKUP_FORMAT)
 assert.equal(backup.recordCounts.historyEvents, 1)
+assert.equal(backup.recordCounts.candidateEvidence, 1)
 assert.equal(backup.records.historyEvents[0].id, 'evt_synthetic')
 assert.equal(validatePrivateBackup(backup).valid, true)
 assert.deepEqual(parsePrivateBackupJson(JSON.stringify(backup)).backup, backup)
@@ -95,13 +104,15 @@ assert.deepEqual(inspectPrivateBackupJson(JSON.stringify(malformed)).validation.
 assert.throws(() => parsePrivateBackupJson('{bad json'), /not valid JSON/)
 assert.throws(() => parsePrivateBackupJson(JSON.stringify(malformed)), /not a compatible/)
 
-const incompatible = { ...backup, formatVersion: 3 }
+const incompatible = { ...backup, formatVersion: PRIVATE_BACKUP_FORMAT_VERSION + 1 }
 assert.equal(validatePrivateBackup(incompatible).valid, false)
 
 const versionOneRecords = structuredClone(backup.records)
 delete versionOneRecords.identityResolutions
+delete versionOneRecords.candidateEvidence
 const versionOneCounts = { ...backup.recordCounts }
 delete versionOneCounts.identityResolutions
+delete versionOneCounts.candidateEvidence
 const compatibleVersionOne = {
   ...backup,
   formatVersion: 1,
@@ -114,6 +125,13 @@ const versionOneDatabase = createMemoryDatabase(Object.fromEntries(storeNames.ma
 await restorePrivateBackup(compatibleVersionOne, { database: versionOneDatabase })
 assert.deepEqual(versionOneDatabase.snapshot().identityResolutions, [])
 assert.equal(versionOneDatabase.snapshot().historyEvents[0].id, 'evt_synthetic')
+
+const versionTwoRecords = structuredClone(backup.records)
+delete versionTwoRecords.candidateEvidence
+const versionTwoCounts = { ...backup.recordCounts }
+delete versionTwoCounts.candidateEvidence
+const compatibleVersionTwo = { ...backup, formatVersion: 2, databaseVersion: 2, recordCounts: versionTwoCounts, records: versionTwoRecords }
+assert.equal(validatePrivateBackup(compatibleVersionTwo).valid, true)
 
 const beforeFailedRestore = database.snapshot()
 const failedDatabase = createMemoryDatabase(beforeFailedRestore, PRIVATE_STORES.historyEvents)
