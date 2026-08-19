@@ -75,11 +75,11 @@ assert.equal(searchQueries.includes('Synthetic Series 1'), true)
 assert.equal(searchQueries.includes('Synthetic Series 1: Season 1: Episode 4'), false)
 assert.deepEqual(records, before)
 
-const evaluationTitles = Array.from({ length: 50 }, (_, index) => ({
+const evaluationTitles = Array.from({ length: 200 }, (_, index) => ({
   id: `title:evaluation-${index}`,
   type: index % 5 === 0 ? 'unknown' : index % 2 === 0 ? 'movie' : 'series',
   title: index % 7 === 0 ? `Name ${index}` : `Synthetic Evaluation ${index}`,
-  originalTitle: index % 5 === 0 ? `Synthetic: Ambiguous ${index}` : `Synthetic Evaluation ${index}`
+  originalTitle: index % 10 === 0 ? `Synthetic Evaluation ${index} - Season 2` : index % 5 === 0 ? `Synthetic: Ambiguous ${index}` : `Synthetic Evaluation ${index}`
 }))
 const evaluationEvents = evaluationTitles.flatMap((title, index) => [
   {
@@ -103,6 +103,10 @@ assert.deepEqual(evaluationSelection.map(record => record.title.id), selectTmdbE
 assert.equal(evaluationSelection.some(record => record.sourceIds.length > 1), true)
 assert.equal(evaluationSelection.some(record => record.hasEpisodeStructure), true)
 assert.equal(evaluationSelection.some(record => record.ambiguous), true)
+const largeEvaluationSelection = selectTmdbEvaluationTitles(evaluationRecords, 200)
+assert.equal(largeEvaluationSelection.length, 200)
+assert.equal(largeEvaluationSelection.some(record => record.lookupNormalization.applied), true)
+assert.equal(largeEvaluationSelection.some(record => record.sourceIds.length > 1), true)
 
 const evaluation = await runTmdbMatchingEvaluationFromRecords(evaluationRecords, {
   limit: 50,
@@ -116,7 +120,15 @@ assert.equal(evaluation.sameNameAmbiguityCases > 0, true)
 assert.equal(evaluation.crossSourceTitles > 0, true)
 assert.equal(evaluation.obviousFalsePositives, 0)
 assert.equal(evaluation.confidenceDistribution.review75To84 > 0, true)
-assert.equal(evaluation.normalization.normalizedLookups, 0)
+assert.equal(evaluation.normalization.normalizedLookups > 0, true)
+assert.deepEqual(evaluationRecords, evaluationBefore)
+
+const largeEvaluation = await runTmdbMatchingEvaluationFromRecords(evaluationRecords, {
+  limit: 200,
+  searchCandidates: async ({ query, mediaTypes }) => [{ provider: 'tmdb', externalId: `${query}-primary`, mediaType: mediaTypes[0], canonicalTitle: query, releaseDate: null, releaseYear: null }]
+})
+assert.equal(largeEvaluation.results.length, 200)
+assert.equal(largeEvaluation.normalization.normalizedLookups > 0, true)
 assert.deepEqual(evaluationRecords, evaluationBefore)
 
 const typeConflictEvaluation = await runTmdbMatchingEvaluationFromRecords({

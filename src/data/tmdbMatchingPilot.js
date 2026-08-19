@@ -68,14 +68,18 @@ export function selectTmdbEvaluationTitles({ titles = [], events = [], sources =
     if (record && !selected.some(item => item.title.id === record.title.id) && selected.length < limit) selected.push(record)
   }
   const from = (filter, count) => ranked(records.filter(filter)).slice(0, count).forEach(add)
+  const quotas = limit >= 200
+    ? { crossSource: 20, ambiguous: 25, episodes: 40, generic: 25, normalizedAmazon: 30, movies: 40, series: 40, unresolvedAmazon: 60 }
+    : { crossSource: 5, ambiguous: 5, episodes: 8, generic: 6, normalizedAmazon: 10, movies: 10, series: 10, unresolvedAmazon: 10 }
 
-  from(record => record.sourceIds.length > 1, 5)
-  from(record => record.ambiguous, 5)
-  from(record => record.hasEpisodeStructure, 8)
-  from(record => record.genericName, 6)
-  from(record => record.title.type === 'movie', 10)
-  from(record => record.title.type === 'series', 10)
-  from(record => record.title.type === 'unknown' && record.sourceIds.includes('source:amazon-prime-video'), 10)
+  from(record => record.sourceIds.length > 1, quotas.crossSource)
+  from(record => record.ambiguous, quotas.ambiguous)
+  from(record => record.hasEpisodeStructure, quotas.episodes)
+  from(record => record.genericName, quotas.generic)
+  from(record => record.lookupNormalization.applied, quotas.normalizedAmazon)
+  from(record => record.title.type === 'movie', quotas.movies)
+  from(record => record.title.type === 'series', quotas.series)
+  from(record => record.title.type === 'unknown' && record.sourceIds.includes('source:amazon-prime-video'), quotas.unresolvedAmazon)
   ranked(records).forEach(add)
 
   return selected.slice(0, limit)

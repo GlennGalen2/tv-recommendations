@@ -146,6 +146,7 @@ export function createIdentityResolutionPanel({ requestRender }) {
             <p>Runs locally against a deterministic private-title sample. Results remain in this panel only; no candidate or resolution is persisted or automatically accepted.</p>
             <button class="action-button" id="run-tmdb-matching-pilot" ${storeReady && state.status !== 'loading' && state.status !== 'running-evaluation' ? '' : 'disabled'}>${state.status === 'running-evaluation' ? 'Running evaluation…' : 'Run 10-title pilot'}</button>
             <button class="action-button" id="run-tmdb-matching-evaluation" ${storeReady && state.status !== 'loading' && state.status !== 'running-evaluation' ? '' : 'disabled'}>${state.status === 'running-evaluation' ? 'Running evaluation…' : 'Run 50-title evaluation'}</button>
+            <button class="action-button" id="run-tmdb-matching-evaluation-200" ${storeReady && state.status !== 'loading' && state.status !== 'running-evaluation' ? '' : 'disabled'}>${state.status === 'running-evaluation' ? 'Running evaluation…' : 'Run 200-title evaluation'}</button>
             ${evaluation ? `<div class="analysis-grid">
               <p><strong>${evaluation.distribution['strong-candidate']}</strong> strong candidates</p>
               <p><strong>${evaluation.distribution['review-candidate']}</strong> review candidates</p>
@@ -190,6 +191,7 @@ export function createIdentityResolutionPanel({ requestRender }) {
     document.querySelector('#undo-synthetic-resolution')?.addEventListener('click', undoSyntheticDecision)
     document.querySelector('#run-tmdb-matching-pilot')?.addEventListener('click', () => runEvaluation(10))
     document.querySelector('#run-tmdb-matching-evaluation')?.addEventListener('click', () => runEvaluation(50))
+    document.querySelector('#run-tmdb-matching-evaluation-200')?.addEventListener('click', () => runEvaluation(200))
     document.querySelectorAll('.evaluation-filter').forEach(button => {
       button.addEventListener('click', () => setEvaluationFilter(button.dataset.evaluationFilter))
     })
