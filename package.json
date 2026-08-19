@@ -15,7 +15,8 @@
     "test:viewing-analysis": "node tests/viewingAnalysis.test.js",
     "test:import-batch-maintenance": "node tests/importBatchMaintenance.test.js",
     "test:identity-resolution": "node tests/identityResolution.test.js",
-    "test:tmdb-credential-store": "node tests/tmdbCredentialStore.test.js"
+    "test:tmdb-credential-store": "node tests/tmdbCredentialStore.test.js",
+    "test:tmdb-connection": "node tests/tmdbConnectionTest.test.js"
   },
   "devDependencies": {
     "vite": "^8.2.0",
