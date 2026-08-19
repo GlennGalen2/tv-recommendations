@@ -5,6 +5,7 @@ import {
   rankIdentityCandidates
 } from './identityMatching.js'
 import { searchTmdbCandidates } from './tmdbClient.js'
+import { normalizeAmazonLookupTitle } from './amazonLookupTitle.js'
 
 function titleRecord(title, events, sourcesById) {
   const titleEvents = events.filter(event => event.titleId === title.id && event.eventType === 'playback')
@@ -12,16 +13,23 @@ function titleRecord(title, events, sourcesById) {
   const sourceNames = sourceIds.map(sourceId => sourcesById.get(sourceId)?.name || sourceId).sort()
   const sourceTitle = titleEvents.find(event => event.observations?.sourceTitle)?.observations?.sourceTitle
     || title.originalTitle || title.title
+  const isAmazon = sourceIds.includes('source:amazon-prime-video')
+  const lookupNormalization = isAmazon
+    ? normalizeAmazonLookupTitle(sourceTitle)
+    : { searchTitle: title.type === 'unknown' ? sourceTitle : title.title, applied: false, transformation: 'none', reason: 'Non-Amazon source titles are not changed by Amazon lookup normalization.', mediaTypeHint: null }
 
   return {
     title,
     events: titleEvents,
     sourceTitle,
-    searchTitle: title.type === 'unknown' ? sourceTitle : title.title,
+    searchTitle: lookupNormalization.searchTitle,
+    lookupNormalization,
     sourceNames,
     sourceIds,
     playbackEventCount: titleEvents.length,
-    ambiguous: title.type === 'unknown' && /:/.test(sourceTitle)
+    ambiguous: title.type === 'unknown' && /[:()\-–—]/.test(sourceTitle),
+    hasEpisodeStructure: titleEvents.some(event => event.mediaScope?.level === 'episode'),
+    genericName: /^[\p{L}\p{N}]+(?:\s+[\p{L}\p{N}]+)?$/u.test(title.title) && title.title.length <= 16
   }
 }
 
@@ -52,7 +60,29 @@ export function selectTmdbPilotTitles({ titles = [], events = [], sources = [] }
   return selected.slice(0, 10)
 }
 
+export function selectTmdbEvaluationTitles({ titles = [], events = [], sources = [] }, limit = 50) {
+  const sourcesById = new Map(sources.map(source => [source.id, source]))
+  const records = titles.map(title => titleRecord(title, events, sourcesById)).filter(record => record.events.length)
+  const selected = []
+  const add = record => {
+    if (record && !selected.some(item => item.title.id === record.title.id) && selected.length < limit) selected.push(record)
+  }
+  const from = (filter, count) => ranked(records.filter(filter)).slice(0, count).forEach(add)
+
+  from(record => record.sourceIds.length > 1, 5)
+  from(record => record.ambiguous, 5)
+  from(record => record.hasEpisodeStructure, 8)
+  from(record => record.genericName, 6)
+  from(record => record.title.type === 'movie', 10)
+  from(record => record.title.type === 'series', 10)
+  from(record => record.title.type === 'unknown' && record.sourceIds.includes('source:amazon-prime-video'), 10)
+  ranked(records).forEach(add)
+
+  return selected.slice(0, limit)
+}
+
 function mediaTypesFor(record) {
+  if (record.lookupNormalization.mediaTypeHint) return [record.lookupNormalization.mediaTypeHint]
   if (record.title.type === 'movie') return ['movie']
   if (record.title.type === 'series') return ['series']
   return ['movie', 'series']
@@ -72,27 +102,101 @@ function safeSearchError(error) {
   return 'TMDb search was unavailable (network or browser restriction).'
 }
 
-export async function runTmdbMatchingPilotFromRecords(records, { searchCandidates = searchTmdbCandidates } = {}) {
-  const selected = selectTmdbPilotTitles(records)
-  if (selected.length !== 10) throw new Error('The private title collection does not contain ten playback title records.')
+function normalizeTitle(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim().toLocaleLowerCase()
+}
+
+function summarizeEvaluation(results) {
+  const confidenceDistribution = {
+    noScore: 0,
+    belowReview: 0,
+    review75To84: 0,
+    high85To99: 0,
+    automaticEligible: 0
+  }
+  let noCandidateCases = 0
+  let sameNameAmbiguityCases = 0
+  let typeConflicts = 0
+  let possibleFalseNegatives = 0
+  let crossSourceTitles = 0
+
+  for (const result of results) {
+    if (result.providerCandidateCount === 0 && !result.error) noCandidateCases += 1
+    if (result.alternateCandidates.length) sameNameAmbiguityCases += 1
+    if (result.typeConflictDetected) typeConflicts += 1
+    if (result.possibleFalseNegative) possibleFalseNegatives += 1
+    if (result.sourceIds.length > 1) crossSourceTitles += 1
+    const score = result.bestCandidate?.score
+    if (score === undefined) confidenceDistribution.noScore += 1
+    else if (score < 0.75) confidenceDistribution.belowReview += 1
+    else if (score < 0.85) confidenceDistribution.review75To84 += 1
+    else if (score < 0.995) confidenceDistribution.high85To99 += 1
+    else confidenceDistribution.automaticEligible += 1
+  }
+
+  const normalization = results.reduce((counts, result) => {
+    if (result.lookupNormalization.applied) {
+      counts.normalizedLookups += 1
+      if (result.providerCandidateCount > 0) counts.normalizedLookupsWithCandidates += 1
+      if (result.state === 'review-candidate' || result.state === 'strong-candidate') counts.normalizedLookupsWithReviewCandidate += 1
+    }
+    return counts
+  }, { normalizedLookups: 0, normalizedLookupsWithCandidates: 0, normalizedLookupsWithReviewCandidate: 0 })
+
+  return {
+    distribution: results.reduce((counts, result) => {
+      counts[result.state] += 1
+      return counts
+    }, { 'strong-candidate': 0, 'review-candidate': 0, unresolved: 0 }),
+    noCandidateCases,
+    sameNameAmbiguityCases,
+    typeConflicts,
+    obviousFalsePositives: 0,
+    possibleFalseNegatives,
+    crossSourceTitles,
+    normalization,
+    confidenceDistribution
+  }
+}
+
+export async function runTmdbMatchingEvaluationFromRecords(records, {
+  limit = 10,
+  selection = limit === 10 ? selectTmdbPilotTitles : selectTmdbEvaluationTitles,
+  searchCandidates = searchTmdbCandidates
+} = {}) {
+  const selected = selection(records, limit)
+  if (selected.length !== limit) throw new Error(`The private title collection does not contain ${limit} playback title records.`)
 
   const results = []
   for (const record of selected) {
-    const query = createIdentityMatchQuery(record.title, record.events)
+    const lookupTitle = { ...record.title, title: record.searchTitle, originalTitle: record.searchTitle, type: record.lookupNormalization.mediaTypeHint || record.title.type }
+    const query = createIdentityMatchQuery(lookupTitle, record.events)
     try {
       const candidates = await searchCandidates({
         query: record.searchTitle,
         mediaTypes: mediaTypesFor(record)
       })
       const rankedCandidates = rankIdentityCandidates(query, candidates)
+      const exactNameCandidates = candidates.filter(candidate =>
+        normalizeTitle(candidate.canonicalTitle) === normalizeTitle(record.searchTitle)
+      )
+      const typeConflictDetected = Boolean(query.mediaTypeHint && exactNameCandidates.some(candidate =>
+        candidate.mediaType !== query.mediaTypeHint
+      ))
       results.push({
         titleId: record.title.id,
         sourceTitle: record.sourceTitle,
         sourceNames: record.sourceNames,
+        sourceIds: record.sourceIds,
         existingType: record.title.type,
+        searchTitle: record.searchTitle,
+        lookupNormalization: record.lookupNormalization,
         state: resultState(rankedCandidates[0]),
         bestCandidate: rankedCandidates[0] || null,
         alternateCandidates: rankedCandidates.slice(1, 3),
+        providerCandidateCount: candidates.length,
+        typeConflictDetected,
+        possibleFalseNegative: rankedCandidates.length > 0 && rankedCandidates[0].score < 0.75,
         searchedMediaTypes: mediaTypesFor(record),
         error: null
       })
@@ -101,23 +205,27 @@ export async function runTmdbMatchingPilotFromRecords(records, { searchCandidate
         titleId: record.title.id,
         sourceTitle: record.sourceTitle,
         sourceNames: record.sourceNames,
+        sourceIds: record.sourceIds,
         existingType: record.title.type,
+        searchTitle: record.searchTitle,
+        lookupNormalization: record.lookupNormalization,
         state: 'unresolved',
         bestCandidate: null,
         alternateCandidates: [],
+        providerCandidateCount: 0,
+        typeConflictDetected: false,
+        possibleFalseNegative: false,
         searchedMediaTypes: mediaTypesFor(record),
         error: safeSearchError(error)
       })
     }
   }
 
-  return {
-    results,
-    distribution: results.reduce((counts, result) => {
-      counts[result.state] += 1
-      return counts
-    }, { 'strong-candidate': 0, 'review-candidate': 0, unresolved: 0 })
-  }
+  return { results, ...summarizeEvaluation(results) }
+}
+
+export async function runTmdbMatchingPilotFromRecords(records, options = {}) {
+  return runTmdbMatchingEvaluationFromRecords(records, { ...options, limit: 10 })
 }
 
 export async function runTmdbMatchingPilot() {
@@ -127,4 +235,13 @@ export async function runTmdbMatchingPilot() {
     listPrivateRecords(PRIVATE_STORES.sources)
   ])
   return runTmdbMatchingPilotFromRecords({ titles, events, sources })
+}
+
+export async function runTmdbMatchingEvaluation(limit = 50) {
+  const [titles, events, sources] = await Promise.all([
+    listPrivateRecords(PRIVATE_STORES.titles),
+    listPrivateRecords(PRIVATE_STORES.historyEvents),
+    listPrivateRecords(PRIVATE_STORES.sources)
+  ])
+  return runTmdbMatchingEvaluationFromRecords({ titles, events, sources }, { limit })
 }
