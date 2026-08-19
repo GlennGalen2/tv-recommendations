@@ -15,9 +15,21 @@ function slugify(value) {
 
 function csvRows(text) {
   const rows = []
+  let blankRows = 0
   let row = []
   let value = ''
   let quoted = false
+
+  function finishRow() {
+    row.push(value)
+    if (row.length === 1 && !row[0].trim()) {
+      blankRows += 1
+    } else {
+      rows.push(row)
+    }
+    row = []
+    value = ''
+  }
 
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index]
@@ -37,12 +49,7 @@ function csvRows(text) {
         index += 1
       }
 
-      row.push(value)
-      if (row.some(cell => cell.length > 0)) {
-        rows.push(row)
-      }
-      row = []
-      value = ''
+      finishRow()
     } else {
       value += character
     }
@@ -52,12 +59,11 @@ function csvRows(text) {
     throw new Error('The CSV contains an unterminated quoted value.')
   }
 
-  row.push(value)
-  if (row.some(cell => cell.length > 0)) {
-    rows.push(row)
+  if (row.length || value.length) {
+    finishRow()
   }
 
-  return rows
+  return { rows, blankRows }
 }
 
 function headerIndex(headers, name) {
@@ -169,28 +175,77 @@ function parseRating(value) {
     : { raw, value: null }
 }
 
+function parseEpisodePart(parts) {
+  const explicitEpisodeIndex = parts.findIndex(part => /^(episode|chapter)\s+\d+|^e\d+$/i.test(part))
+  const explicitEpisode = explicitEpisodeIndex === -1 ? null : parts[explicitEpisodeIndex]
+  const match = explicitEpisode?.match(/(?:episode\s+|chapter\s+|e)(\d+)/i)
+
+  return {
+    episodeNumber: match ? Number(match[1]) : null,
+    episodeTitle: parts.filter((_, index) => index !== explicitEpisodeIndex).join(': ') || null
+  }
+}
+
 function parseTitle(sourceTitle) {
   const parts = sourceTitle.split(':').map(normalizeText)
-  const seasonIndex = parts.findIndex(part => /^(season\s+\d+|s\d+)$/i.test(part))
+  const collectionIndex = parts.findIndex(part =>
+    /^(season\s+\d+|s\d+|series\s+\d+|limited series|specials?|season 0)$/i.test(part)
+  )
 
-  if (seasonIndex > 0) {
-    const seasonMatch = parts[seasonIndex].match(/(?:season\s+|s)(\d+)/i)
-    const episodePart = parts.slice(seasonIndex + 1).find(part =>
-      /^(episode\s+\d+|chapter\s+\d+|e\d+)$/i.test(part)
-    )
-    const episodeMatch = episodePart?.match(/(?:episode\s+|chapter\s+|e)(\d+)/i)
+  if (collectionIndex > 0) {
+    const collection = parts[collectionIndex]
+    const seasonMatch = collection.match(/(?:season\s+|s)(\d+)/i)
+    const seriesMatch = collection.match(/^series\s+(\d+)$/i)
+    const isSpecial = /^(specials?|season 0)$/i.test(collection)
+    const childParts = parts.slice(collectionIndex + 1)
+
+    if (isSpecial) {
+      return {
+        title: parts.slice(0, collectionIndex).join(': '),
+        type: 'series',
+        classification: 'special',
+        mediaScope: {
+          level: 'special',
+          specialTitle: childParts.join(': ') || null
+        }
+      }
+    }
+
+    if (childParts.length) {
+      const episode = parseEpisodePart(childParts)
+
+      return {
+        title: parts.slice(0, collectionIndex).join(': '),
+        type: 'series',
+        classification: 'episode',
+        mediaScope: {
+          level: 'episode',
+          ...(seasonMatch ? { seasonNumber: Number(seasonMatch[1]) } : {}),
+          ...(seriesMatch ? { seriesNumber: Number(seriesMatch[1]) } : {}),
+          ...(episode.episodeNumber ? { episodeNumber: episode.episodeNumber } : {}),
+          ...(episode.episodeTitle ? { episodeTitle: episode.episodeTitle } : {})
+        }
+      }
+    }
+
+    if (seasonMatch) {
+      return {
+        title: parts.slice(0, collectionIndex).join(': '),
+        type: 'series',
+        classification: 'season',
+        mediaScope: { level: 'season', seasonNumber: Number(seasonMatch[1]) }
+      }
+    }
 
     return {
-      title: parts.slice(0, seasonIndex).join(': '),
+      title: parts.slice(0, collectionIndex).join(': '),
       type: 'series',
-      classification: episodeMatch ? 'episode' : 'likely-series',
-      mediaScope: episodeMatch
-        ? {
-            level: 'episode',
-            seasonNumber: Number(seasonMatch[1]),
-            episodeNumber: Number(episodeMatch[1])
-          }
-        : { level: 'title' }
+      classification: 'series',
+      mediaScope: {
+        level: 'title',
+        seriesKind: collection.toLowerCase() === 'limited series' ? 'limited-series' : 'series',
+        seriesNumber: seriesMatch ? Number(seriesMatch[1]) : null
+      }
     }
   }
 
@@ -233,7 +288,8 @@ export async function parseNetflixViewingHistoryCsv(csvText, options) {
     throw new TypeError('A viewerId is required for a Netflix import.')
   }
 
-  const rows = csvRows(csvText)
+  const parsedRows = csvRows(csvText)
+  const rows = parsedRows.rows
 
   if (!rows.length) {
     throw new Error('The CSV is empty.')
@@ -254,8 +310,10 @@ export async function parseNetflixViewingHistoryCsv(csvText, options) {
   const sourceOccurrenceCounts = new Map()
   const classificationCounts = {
     likelyMovies: 0,
-    likelySeries: 0,
+    series: 0,
+    seasons: 0,
     episodes: 0,
+    specials: 0,
     ambiguous: 0
   }
   const displayDates = []
@@ -295,15 +353,15 @@ export async function parseNetflixViewingHistoryCsv(csvText, options) {
     sourceOccurrenceCounts.set(sourceOccurrenceKey, sourceOccurrence + 1)
     const eventHash = await sha256(`${sourceOccurrenceKey}|${sourceOccurrence}`)
     const eventId = `evt_netflix_${eventHash.slice(0, 24)}`
-    classificationCounts[
-      parsedTitle.classification === 'likely-movie'
-        ? 'likelyMovies'
-        : parsedTitle.classification === 'likely-series'
-          ? 'likelySeries'
-          : parsedTitle.classification === 'episode'
-            ? 'episodes'
-            : 'ambiguous'
-    ] += 1
+    const classificationKey = {
+      'likely-movie': 'likelyMovies',
+      series: 'series',
+      season: 'seasons',
+      episode: 'episodes',
+      special: 'specials',
+      ambiguous: 'ambiguous'
+    }[parsedTitle.classification]
+    classificationCounts[classificationKey] += 1
 
     if (parsedTitle.classification === 'ambiguous') {
       problems.push(makeProblem(
@@ -353,6 +411,12 @@ export async function parseNetflixViewingHistoryCsv(csvText, options) {
   const contentHash = await sha256(csvText)
   const batchHash = await sha256(`${options.viewerId}|${contentHash}`)
   const dates = displayDates.sort()
+  const problemCounts = problems.reduce((counts, problem) => {
+    counts[problem.code] = (counts[problem.code] || 0) + 1
+    return counts
+  }, {})
+  const rejectedRows = (problemCounts['missing-title'] || 0)
+    + (problemCounts['invalid-date'] || 0)
 
   return {
     source: {
@@ -376,13 +440,16 @@ export async function parseNetflixViewingHistoryCsv(csvText, options) {
     events,
     summary: {
       totalRows: Math.max(rows.length - 1, 0),
+      blankRowsExcluded: parsedRows.blankRows,
       recognizedRows: events.length,
+      rejectedRows,
       ...classificationCounts,
       dateRange: dates.length
         ? { earliest: dates[0], latest: dates[dates.length - 1] }
         : null,
       assumedLocalTime,
-      problems
+      problems,
+      problemCounts
     }
   }
 }

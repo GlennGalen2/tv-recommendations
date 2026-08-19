@@ -103,7 +103,7 @@ export function createNetflixImportPanel({ requestRender, onImportComplete }) {
       || preview.preview.batchAlreadyImported
       || state.status === 'importing'
     const problemSummary = preview?.preview.problems.length
-      ? `${pluralize(preview.preview.problems.length, 'row')} need review: ${preview.preview.problems.slice(0, 3).map(problem => `row ${problem.row} (${problem.code})`).join(', ')}${preview.preview.problems.length > 3 ? '…' : ''}`
+      ? `${pluralize(preview.preview.problems.length, 'row')} need review: ${Object.entries(preview.preview.problemCounts).map(([code, count]) => `${count} ${code}`).join(', ')}.`
       : 'No parsing problems found.'
 
     return `
@@ -136,7 +136,8 @@ export function createNetflixImportPanel({ requestRender, onImportComplete }) {
           ${preview ? `
             <div class="import-preview">
               <strong>Preview only</strong>
-              <p>${pluralize(preview.preview.recognizedRows, 'recognized row')}: ${pluralize(preview.preview.episodes, 'episode')}, ${pluralize(preview.preview.likelySeries, 'likely series', 'likely series')}, ${pluralize(preview.preview.likelyMovies, 'likely movie')}, and ${pluralize(preview.preview.ambiguous, 'ambiguous row')}.</p>
+              <p>${pluralize(preview.preview.recognizedRows, 'recognized row')}: ${pluralize(preview.preview.episodes, 'episode')}, ${pluralize(preview.preview.seasons, 'season')}, ${pluralize(preview.preview.series, 'series record')}, ${pluralize(preview.preview.specials, 'special')}, ${pluralize(preview.preview.likelyMovies, 'likely movie')}, and ${pluralize(preview.preview.ambiguous, 'ambiguous row')}.</p>
+              <p>${pluralize(preview.preview.rejectedRows, 'row')} rejected for missing required data; ${pluralize(preview.preview.blankRowsExcluded, 'blank row')} excluded.</p>
               <p>Date range: ${formatDateRange(preview.preview.dateRange)}${preview.preview.assumedLocalTime ? ' (Netflix timestamps treated as local browser time)' : ''}.</p>
               <p>${preview.preview.batchAlreadyImported
                 ? 'This exact file was already imported for this viewer; no records will be added.'
