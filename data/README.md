@@ -25,6 +25,21 @@ snapshot for a future user-directed backup or sync feature; it does not upload
 anything. Database upgrades create stores idempotently and close stale browser
 connections on version changes.
 
+## Derived viewing analysis
+
+The private Viewing History Analysis is recomputed locally from immutable
+playback events and private title/source records. It is deliberately not
+persisted: recomputation is inexpensive at the current scale and prevents a
+derived summary becoming a competing authority or going stale after an import,
+restore, or future correction. It does not infer preferences or reactions.
+
+Cross-source title consolidation is automatic only for exactly normalized
+display titles with the same known type (`movie` or `series`). Unknown source
+titles remain separate, reversible references. Future metadata enrichment may
+add authoritative external IDs (for example TMDb, IMDb, TVDB, or provider
+catalog IDs), release year, media type, season/episode numbers, and original
+language to resolve those references safely.
+
 ## Authority and evidence flow
 
 1. `catalog/` supplies stable canonical title identities.

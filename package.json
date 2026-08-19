@@ -11,7 +11,9 @@
     "validate:private-store": "node --check src/data/privateStore.js",
     "test:netflix-importer": "node tests/netflixViewingHistory.test.js",
     "test:private-backup": "node tests/privateBackup.test.js",
-    "test:amazon-importer": "node tests/amazonPrimeViewingHistory.test.js"
+    "test:amazon-importer": "node tests/amazonPrimeViewingHistory.test.js",
+    "test:viewing-analysis": "node tests/viewingAnalysis.test.js",
+    "test:import-batch-maintenance": "node tests/importBatchMaintenance.test.js"
   },
   "devDependencies": {
     "vite": "^8.2.0",

@@ -14,6 +14,8 @@ import {
 import { createNetflixImportPanel } from './ui/netflixImportPanel.js'
 import { createAmazonPrimeImportPanel } from './ui/amazonPrimeImportPanel.js'
 import { createPrivateBackupPanel } from './ui/privateBackupPanel.js'
+import { createViewingAnalysisPanel } from './ui/viewingAnalysisPanel.js'
+import { createImportBatchMaintenancePanel } from './ui/importBatchMaintenancePanel.js'
 
 const titlesById = new Map(
   catalog.titles.map(title => [title.id, title])
@@ -31,17 +33,23 @@ let privateDemoState = {
 
 const netflixImportPanel = createNetflixImportPanel({
   requestRender: render,
-  onImportComplete: refreshPrivateDemoState
+  onImportComplete: refreshPrivateDataViews
 })
 
 const amazonPrimeImportPanel = createAmazonPrimeImportPanel({
   requestRender: render,
-  onImportComplete: refreshPrivateDemoState
+  onImportComplete: refreshPrivateDataViews
 })
 
 const privateBackupPanel = createPrivateBackupPanel({
   requestRender: render,
-  onRestoreComplete: refreshPrivateDemoState
+  onRestoreComplete: refreshPrivateDataViews
+})
+
+const viewingAnalysisPanel = createViewingAnalysisPanel({ requestRender: render })
+const importBatchMaintenancePanel = createImportBatchMaintenancePanel({
+  requestRender: render,
+  onRemovalComplete: refreshPrivateDataViews
 })
 
 const shows = recommendationData.recommendations.map(recommendation => {
@@ -138,6 +146,14 @@ async function refreshPrivateDemoState() {
   }
 }
 
+async function refreshPrivateDataViews() {
+  await Promise.all([
+    refreshPrivateDemoState(),
+    viewingAnalysisPanel.refresh(),
+    importBatchMaintenancePanel.refresh()
+  ])
+}
+
 async function initializePrivateDemo() {
   try {
     await initializePrivateStore()
@@ -159,7 +175,7 @@ async function initializePrivateDemo() {
       })
     }
 
-    await refreshPrivateDemoState()
+    await refreshPrivateDataViews()
   } catch (error) {
     privateDemoState = {
       ...privateDemoState,
@@ -195,7 +211,7 @@ async function recordPrivateWatch(show) {
     }
   })
 
-  await refreshPrivateDemoState()
+  await refreshPrivateDataViews()
 }
 
 async function recordPrivateReaction(show, reaction) {
@@ -225,7 +241,7 @@ async function recordPrivateReaction(show, reaction) {
     await createReaction(nextReaction)
   }
 
-  await refreshPrivateDemoState()
+  await refreshPrivateDataViews()
 }
 
 async function updateShow(id, action) {
@@ -417,6 +433,10 @@ function render() {
 
       ${privateBackupPanel.render(privateDemoState.status === 'ready')}
 
+      ${viewingAnalysisPanel.render(privateDemoState.status === 'ready')}
+
+      ${importBatchMaintenancePanel.render(privateDemoState.status === 'ready')}
+
       <section class="recent-section">
 
         <div class="section-heading">
@@ -455,6 +475,8 @@ function render() {
   netflixImportPanel.bind(privateDemoState.status === 'ready')
   amazonPrimeImportPanel.bind(privateDemoState.status === 'ready')
   privateBackupPanel.bind(privateDemoState.status === 'ready')
+  viewingAnalysisPanel.bind(privateDemoState.status === 'ready')
+  importBatchMaintenancePanel.bind(privateDemoState.status === 'ready')
 }
 
 render()

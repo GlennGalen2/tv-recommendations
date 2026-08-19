@@ -1,3 +1,5 @@
+import { deriveViewingAnalysis } from './viewingAnalysis.js'
+
 const DATABASE_NAME = 'tv-recommendations-private'
 const DATABASE_VERSION = 1
 const RECORD_SCHEMA_VERSION = 1
@@ -266,6 +268,106 @@ export async function listPrivateRecords(storeName, options = {}) {
   const records = await requestAsPromise(source.getAll(options.query))
   await transactionAsPromise(transaction)
   return records
+}
+
+export async function getPrivateViewingAnalysis() {
+  const [events, titles, sources] = await Promise.all([
+    listPrivateRecords(PRIVATE_STORES.historyEvents),
+    listPrivateRecords(PRIVATE_STORES.titles),
+    listPrivateRecords(PRIVATE_STORES.sources)
+  ])
+
+  return deriveViewingAnalysis({ events, titles, sources })
+}
+
+function recordReferencesTitle(record, titleId, seen = new Set()) {
+  if (record === titleId) return true
+  if (!record || typeof record !== 'object') return false
+  if (seen.has(record)) return false
+  seen.add(record)
+  return Object.values(record).some(value => recordReferencesTitle(value, titleId, seen))
+}
+
+export async function getPrivateImportBatches() {
+  const [batches, events, sources] = await Promise.all([
+    listPrivateRecords(PRIVATE_STORES.importBatches),
+    listPrivateRecords(PRIVATE_STORES.historyEvents),
+    listPrivateRecords(PRIVATE_STORES.sources)
+  ])
+  const sourcesById = new Map(sources.map(source => [source.id, source]))
+
+  return batches.map(batch => ({
+    ...batch,
+    sourceName: sourcesById.get(batch.sourceId)?.name || batch.sourceId,
+    historyEventCount: events.filter(event => event.provenance?.importBatchId === batch.id).length
+  })).sort((left, right) => (right.importedAt || '').localeCompare(left.importedAt || ''))
+}
+
+export async function removePrivateImportBatch(batchId, { database: providedDatabase } = {}) {
+  if (typeof batchId !== 'string' || !batchId.trim()) {
+    throw new TypeError('An import batch id is required for removal.')
+  }
+
+  const database = providedDatabase || await openPrivateStore()
+  const transaction = database.transaction([
+    PRIVATE_STORES.importBatches,
+    PRIVATE_STORES.historyEvents,
+    PRIVATE_STORES.titles,
+    PRIVATE_STORES.reactions,
+    PRIVATE_STORES.preferenceEvidence,
+    PRIVATE_STORES.recommendations,
+    PRIVATE_STORES.metadata,
+    PRIVATE_STORES.viewers,
+    PRIVATE_STORES.sources
+  ], 'readwrite')
+  const completion = transactionAsPromise(transaction)
+  const batches = transaction.objectStore(PRIVATE_STORES.importBatches)
+  const historyEvents = transaction.objectStore(PRIVATE_STORES.historyEvents)
+  const titles = transaction.objectStore(PRIVATE_STORES.titles)
+  const batch = await requestAsPromise(batches.get(batchId))
+
+  if (!batch) {
+    await completion
+    throw new Error('The selected import batch no longer exists.')
+  }
+
+  const [allBatches, allEvents, allReactions, allEvidence, allRecommendations, allMetadata, allViewers, allSources] = await Promise.all([
+    requestAsPromise(batches.getAll()),
+    requestAsPromise(historyEvents.getAll()),
+    requestAsPromise(transaction.objectStore(PRIVATE_STORES.reactions).getAll()),
+    requestAsPromise(transaction.objectStore(PRIVATE_STORES.preferenceEvidence).getAll()),
+    requestAsPromise(transaction.objectStore(PRIVATE_STORES.recommendations).getAll()),
+    requestAsPromise(transaction.objectStore(PRIVATE_STORES.metadata).getAll()),
+    requestAsPromise(transaction.objectStore(PRIVATE_STORES.viewers).getAll()),
+    requestAsPromise(transaction.objectStore(PRIVATE_STORES.sources).getAll())
+  ])
+  const affectedEvents = allEvents.filter(event => event.provenance?.importBatchId === batchId)
+  const affectedTitleIds = new Set(affectedEvents.map(event => event.titleId))
+  const remainingEvents = allEvents.filter(event => event.provenance?.importBatchId !== batchId)
+  const otherRecords = [
+    ...allBatches.filter(candidate => candidate.id !== batchId),
+    ...remainingEvents,
+    ...allReactions,
+    ...allEvidence,
+    ...allRecommendations,
+    ...allMetadata,
+    ...allViewers,
+    ...allSources
+  ]
+  const orphanedTitleIds = [...affectedTitleIds].filter(titleId =>
+    !otherRecords.some(record => recordReferencesTitle(record, titleId))
+  )
+
+  for (const event of affectedEvents) historyEvents.delete(event.id)
+  batches.delete(batchId)
+  for (const titleId of orphanedTitleIds) titles.delete(titleId)
+  await completion
+
+  return {
+    removedBatchId: batchId,
+    removedHistoryEvents: affectedEvents.length,
+    removedTitles: orphanedTitleIds.length
+  }
 }
 
 export async function updatePrivateRecord(storeName, id, changes) {
