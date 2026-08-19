@@ -13,16 +13,16 @@ function id() { return `rct_${crypto.randomUUID()}` }
 function list(value) { return String(value || '').split(',').map(item => item.trim()).filter(Boolean) }
 
 export function createPreferencePanel({ requestRender, onPreferenceChanged = () => {} }) {
-  let state = { status: 'loading', analysis: null, titles: [], viewers: [], reactions: [], preview: null, error: null, success: null }
+  let state = { status: 'loading', analysis: null, titles: [], viewers: [], reactions: [], resolutions: [], preview: null, error: null, success: null }
 
   async function refresh() {
     state = { ...state, status: 'loading', error: null }
     requestRender()
     try {
-      const [analysis, titles, viewers, reactions] = await Promise.all([
-        getPrivatePreferenceAnalysis(), listPrivateRecords(PRIVATE_STORES.titles), listPrivateRecords(PRIVATE_STORES.viewers), listPrivateRecords(PRIVATE_STORES.reactions)
+      const [analysis, titles, viewers, reactions, resolutions] = await Promise.all([
+        getPrivatePreferenceAnalysis(), listPrivateRecords(PRIVATE_STORES.titles), listPrivateRecords(PRIVATE_STORES.viewers), listPrivateRecords(PRIVATE_STORES.reactions), listPrivateRecords(PRIVATE_STORES.identityResolutions)
       ])
-      state = { ...state, status: 'ready', analysis, titles, viewers, reactions, error: null }
+      state = { ...state, status: 'ready', analysis, titles, viewers, reactions, resolutions, error: null }
     } catch { state = { ...state, status: 'error', error: 'Private preference data is unavailable in this browser.' } }
     requestRender()
   }
@@ -59,7 +59,7 @@ export function createPreferencePanel({ requestRender, onPreferenceChanged = () 
   async function previewFile(file) {
     if (!file) return
     try {
-      const preview = previewExplicitPreferenceImport(await file.text(), { reactions: state.reactions, titleIds: new Set(state.titles.map(title => title.id)), viewerIds: new Set(state.viewers.map(viewer => viewer.id)), fileName: file.name })
+      const preview = previewExplicitPreferenceImport(await file.text(), { reactions: state.reactions, titles: state.titles, resolutions: state.resolutions, viewerIds: new Set(state.viewers.map(viewer => viewer.id)), fileName: file.name })
       state = { ...state, preview, error: null, success: null }; requestRender()
     } catch { state = { ...state, preview: null, error: 'The selected file is not a valid explicit-preferences import.' }; requestRender() }
   }
@@ -67,9 +67,9 @@ export function createPreferencePanel({ requestRender, onPreferenceChanged = () 
   async function commitPreview() {
     if (!state.preview?.records.length) return
     try {
-      const result = await commitExplicitPreferenceImport(state.preview.records)
+      const result = await commitExplicitPreferenceImport({ reactions: state.preview.records, titles: state.preview.titles })
       await refresh(); await onPreferenceChanged()
-      state = { ...state, preview: null, success: `Imported ${result.imported} explicit reaction(s); ${result.skipped} duplicate(s) skipped.` }; requestRender()
+      state = { ...state, preview: null, success: `Imported ${result.imported} explicit reaction(s); ${result.importedTitles} private curated title reference(s) added; ${result.skipped} duplicate(s) skipped.` }; requestRender()
     } catch { state = { ...state, error: 'The explicit-preferences import could not be completed.' }; requestRender() }
   }
 
@@ -84,7 +84,7 @@ export function createPreferencePanel({ requestRender, onPreferenceChanged = () 
       ${state.status === 'loading' ? '<p>Analyzing private preferences locally…</p>' : ''}${state.error ? `<p class="import-error">${escapeHtml(state.error)}</p>` : ''}${state.success ? `<p class="import-success">${escapeHtml(state.success)}</p>` : ''}
       ${analysis ? `<div class="analysis-grid">${viewerCounts}<p><strong>${analysis.behavioral.filter(item => item.direction === 'positive').length}</strong> behavioral positive signals</p><p><strong>${analysis.behavioral.filter(item => item.direction === 'negative').length}</strong> possible early abandonments</p><p><strong>${analysis.behavioral.filter(item => item.signal === 'repeat_viewing').length}</strong> repeat-viewing signals</p><p><strong>${analysis.availabilityUncertain.length}</strong> availability-uncertain cases</p><p><strong>${analysis.conflicts.length}</strong> explicit/inferred conflicts (explicit wins)</p><p><strong>${analysis.differences.length}</strong> Viewer 1/Viewer 2 differences</p></div><p>Strongest explicit positive anchors: ${anchors(analysis.explicit.filter(record => ['loved', 'liked'].includes(record.reaction)).sort((left, right) => (right.strength || 1) - (left.strength || 1)), 'none yet')}.</p><p>Strongest explicit negative anchors: ${anchors(analysis.explicit.filter(record => ['disliked', 'abandoned'].includes(record.reaction)).sort((left, right) => (right.strength || 1) - (left.strength || 1)), 'none yet')}.</p><p>High-confidence behavioral positive anchors: ${anchors(analysis.behavioral.filter(record => record.direction === 'positive' && record.confidence >= 0.7).sort((left, right) => right.strength - left.strength), 'none yet')}.</p><p>Common positive mechanisms: ${mechanismSummary('positive')}.</p><p>Common negative mechanisms: ${mechanismSummary('negative')}.</p>` : ''}
       <div class="import-preview"><h3>Add or correct an explicit reaction</h3><label>Viewer <select id="preference-viewer">${state.viewers.map(viewer => `<option value="${escapeHtml(viewer.id)}">${escapeHtml(viewer.displayName || viewer.id)}</option>`).join('')}</select></label><label>Title or private title ID <input id="preference-title" placeholder="Enter an exact title or title ID" /></label><label>Reaction <select id="preference-reaction">${['loved','liked','okay','disliked','abandoned','unknown'].map(reaction => `<option value="${reaction}">${reaction}</option>`).join('')}</select></label><label>Strength <input id="preference-strength" type="number" min="0" max="1" step="0.1" value="1" /></label><label>Positive mechanisms (comma-separated) <input id="preference-positive" /></label><label>Negative mechanisms (comma-separated) <input id="preference-negative" /></label><label>Concise note <input id="preference-note" maxlength="500" /></label><button class="action-button" id="save-preference" ${storeReady ? '' : 'disabled'}>Save explicit reaction</button></div>
-      <div class="import-preview"><h3>Import curated explicit preferences</h3><p>JSON is parsed locally, previewed, and saved only after confirmation. Raw file contents are never stored.</p><input id="preference-import-file" type="file" accept="application/json,.json" ${storeReady ? '' : 'disabled'} />${state.preview ? `<p>${state.preview.summary.sourceRecords} source records; ${state.preview.summary.importable} importable; ${state.preview.summary.duplicates} duplicates skipped.</p>${state.preview.summary.problems.length ? `<p class="import-error">${escapeHtml(state.preview.summary.problems.join(' '))}</p>` : ''}<button class="action-button" id="confirm-preference-import" ${state.preview.records.length ? '' : 'disabled'}>Import explicit preferences</button>` : ''}</div>
+      <div class="import-preview"><h3>Import curated explicit preferences</h3><p>JSON is parsed locally, previewed, and saved only after confirmation. Records may use a private <code>titleId</code> or a human-readable <code>title</code> with optional <code>year</code>, <code>mediaType</code>, and <code>tmdbId</code>. Raw file contents are never stored.</p><input id="preference-import-file" type="file" accept="application/json,.json" ${storeReady ? '' : 'disabled'} />${state.preview ? `<p>${state.preview.summary.sourceRecords} source records; ${state.preview.summary.importable} safe to import; ${state.preview.summary.curatedTitles} new private curated references; ${state.preview.summary.duplicates} duplicates skipped.</p>${state.preview.previewRecords.slice(0, 20).map(record => `<p>${escapeHtml(record.suppliedTitle || 'private title ID')}: <strong>${escapeHtml(record.status)}</strong>${record.resolvedIdentity?.title ? ` → ${escapeHtml(record.resolvedIdentity.title)}` : ''} · ${escapeHtml(record.reaction)}</p>`).join('')}${state.preview.summary.problems.length ? `<p class="import-error">${escapeHtml(state.preview.summary.problems.join(' '))}</p>` : ''}<button class="action-button" id="confirm-preference-import" ${state.preview.records.length ? '' : 'disabled'}>Import explicit preferences</button>` : ''}</div>
     </div></section>`
   }
   function bind(storeReady) {

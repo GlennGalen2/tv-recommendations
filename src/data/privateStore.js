@@ -673,27 +673,57 @@ export async function supersedeReaction(reaction) {
   return createReaction(reaction)
 }
 
-export async function commitExplicitPreferenceImport(reactions) {
-  if (!Array.isArray(reactions) || !reactions.length) throw new TypeError('At least one explicit reaction is required.')
+export async function commitExplicitPreferenceImport(input) {
+  const { reactions, titles = [] } = Array.isArray(input) ? { reactions: input } : (input || {})
+  if (!Array.isArray(reactions) || !reactions.length || !Array.isArray(titles)) throw new TypeError('At least one explicit reaction is required.')
   for (const reaction of reactions) {
     requireRecord(reaction, PRIVATE_STORES.reactions)
     requireReaction(reaction)
   }
+  for (const title of titles) requireRecord(title, PRIVATE_STORES.titles)
   const database = await openPrivateStore()
-  const transaction = database.transaction(PRIVATE_STORES.reactions, 'readwrite')
+  const transaction = database.transaction([PRIVATE_STORES.reactions, PRIVATE_STORES.titles], 'readwrite')
   const store = transaction.objectStore(PRIVATE_STORES.reactions)
-  const existing = await requestAsPromise(store.getAll())
+  const titleStore = transaction.objectStore(PRIVATE_STORES.titles)
+  const [existing, existingTitles] = await Promise.all([requestAsPromise(store.getAll()), requestAsPromise(titleStore.getAll())])
   const existingIds = new Set(existing.map(reaction => reaction.id))
+  const knownReactions = new Map(existing.map(reaction => [reaction.id, reaction]))
+  const existingTitleIds = new Set(existingTitles.map(title => title.id))
+  const suppliedTitleIds = new Set()
+  for (const title of titles) {
+    if (suppliedTitleIds.has(title.id)) throw new Error('An explicit-preferences import contains duplicate curated title IDs.')
+    suppliedTitleIds.add(title.id)
+  }
+  const availableTitleIds = new Set([...existingTitleIds, ...suppliedTitleIds])
   let imported = 0
   let skipped = 0
+  let importedTitles = 0
+  const plannedReactions = []
   for (const reaction of reactions) {
     if (existingIds.has(reaction.id)) { skipped += 1; continue }
-    store.add(reaction)
+    if (!availableTitleIds.has(reaction.titleId)) throw new Error('An explicit reaction references a title that is not being restored.')
+    if (reaction.supersedesReactionId) {
+      const previous = knownReactions.get(reaction.supersedesReactionId)
+      if (!previous || previous.viewerId !== reaction.viewerId || previous.titleId !== reaction.titleId) {
+        throw new Error('An imported reaction can only supersede the same existing viewer and title.')
+      }
+    }
+    knownReactions.set(reaction.id, reaction)
     existingIds.add(reaction.id)
+    plannedReactions.push(reaction)
+  }
+  for (const title of titles) {
+    if (existingTitleIds.has(title.id)) continue
+    titleStore.add(title)
+    existingTitleIds.add(title.id)
+    importedTitles += 1
+  }
+  for (const reaction of plannedReactions) {
+    store.add(reaction)
     imported += 1
   }
   await transactionAsPromise(transaction)
-  return { imported, skipped }
+  return { imported, skipped, importedTitles }
 }
 
 export async function exportPrivateBackup() {

@@ -39,18 +39,39 @@ assert.equal(analysis.conflicts.some(item => item.titleId === 'title:repeat' && 
 assert.equal(JSON.stringify(analysis).includes('completed_available_run'), true)
 assert.equal(JSON.stringify(analysis.explicit).includes('inferred-behavioral'), false)
 
+const syntheticTitles = [
+  { id: 'title:complete', title: 'Synthetic Complete', type: 'series', releaseYear: 2024, schemaVersion: 1, externalIds: { tmdb: '100' } },
+  { id: 'title:movie', title: 'Synthetic Complete', type: 'movie', releaseYear: 2024, schemaVersion: 1, externalIds: { tmdb: '101' } },
+  { id: 'title:same-2020', title: 'Synthetic Shared Name', type: 'movie', releaseYear: 2020, schemaVersion: 1, externalIds: { tmdb: '200' } },
+  { id: 'title:same-2021', title: 'Synthetic Shared Name', type: 'movie', releaseYear: 2021, schemaVersion: 1, externalIds: { tmdb: '201' } },
+  { id: 'title:source', title: 'Synthetic Source Label', type: 'unknown', schemaVersion: 1, externalIds: {} }
+]
+const syntheticResolutions = [{ id: 'resolution:synthetic', schemaVersion: 1, sourceTitleId: 'title:source', status: 'manually-confirmed', candidate: { provider: 'tmdb', externalId: '300', canonicalTitle: 'Synthetic Canonical Work', mediaType: 'tv', releaseYear: 2022 } }]
 const importText = JSON.stringify({ format: 'tv-recommendations-explicit-preferences', formatVersion: 1, records: [
-  { id: 'import-1', viewerId: 'viewer-1', titleId: 'title:new', reaction: 'liked', strength: 0.8, mechanisms: { positive: ['mystery'], negative: [] }, note: 'Synthetic note', provenance: { sourceRecordId: 'synthetic-1' } },
-  { id: 'import-correction', viewerId: 'viewer-1', titleId: 'title:complete', reaction: 'okay', mechanisms: { positive: [], negative: [] } },
+  { id: 'import-title-id', viewerId: 'viewer-1', titleId: 'title:complete', reaction: 'okay' },
+  { id: 'import-type', viewerId: 'viewer-1', title: 'Synthetic Complete', mediaType: 'movie', reaction: 'liked', mechanisms: { positive: ['synthetic-mechanism'], negative: [] } },
+  { id: 'import-year', viewerId: 'viewer-2', title: 'Synthetic Shared Name', year: 2021, reaction: 'loved' },
+  { id: 'import-exact', viewerId: 'viewer-2', title: 'Synthetic Source Label', reaction: 'okay' },
+  { id: 'import-tmdb', viewerId: 'viewer-1', title: 'Synthetic Alternate Label', tmdbId: '300', mediaType: 'tv', reaction: 'liked' },
+  { id: 'import-ambiguous', viewerId: 'viewer-1', title: 'Synthetic Shared Name', reaction: 'liked' },
+  { id: 'import-absent', viewerId: 'viewer-2', title: 'Synthetic Remembered Work', year: 2023, mediaType: 'tv', reaction: 'loved', note: 'Synthetic note' },
   { id: 'r1', viewerId: 'viewer-1', titleId: 'title:complete', reaction: 'loved' },
-  { id: 'import-2', viewerId: 'viewer-2', titleId: 'title:missing', reaction: 'liked' }
+  { id: 'import-correction', viewerId: 'viewer-1', titleId: 'title:complete', reaction: 'disliked' }
 ] })
-const preview = previewExplicitPreferenceImport(importText, { reactions, titleIds: new Set(['title:new', 'title:complete', 'title:repeat']), viewerIds: new Set(['viewer-1', 'viewer-2']), fileName: 'synthetic-preferences.json' })
-assert.equal(preview.summary.importable, 2)
+const preview = previewExplicitPreferenceImport(importText, { reactions, titles: syntheticTitles, resolutions: syntheticResolutions, viewerIds: new Set(['viewer-1', 'viewer-2']), fileName: 'synthetic-preferences.json' })
+assert.equal(preview.summary.importable, 7)
 assert.equal(preview.summary.duplicates, 1)
 assert.equal(preview.summary.problems.length, 1)
-assert.equal(preview.records[0].supersedesReactionId, null)
-assert.equal(preview.records[0].provenance.importFileName, 'synthetic-preferences.json')
-assert.equal(preview.records.find(record => record.id === 'import-correction').supersedesReactionId, 'r1')
+assert.equal(preview.records.find(record => record.id === 'import-title-id').titleId, 'title:complete')
+assert.equal(preview.records.find(record => record.id === 'import-type').titleId, 'title:movie')
+assert.equal(preview.records.find(record => record.id === 'import-year').titleId, 'title:same-2021')
+assert.equal(preview.records.find(record => record.id === 'import-exact').titleId, 'title:source')
+assert.equal(preview.records.find(record => record.id === 'import-tmdb').titleId.startsWith('title:curated:'), true)
+assert.equal(preview.records.find(record => record.id === 'import-absent').titleId.startsWith('title:curated:'), true)
+assert.equal(preview.titles.length, 2)
+assert.equal(preview.previewRecords.some(record => record.status === 'ambiguous'), true)
+assert.equal(preview.records.find(record => record.id === 'import-type').provenance.importFileName, 'synthetic-preferences.json')
+assert.equal(preview.records.find(record => record.id === 'import-correction').supersedesReactionId, 'import-title-id')
+assert.equal(preview.records.find(record => record.id === 'import-year').viewerId, 'viewer-2')
 
 console.log('Private preference checks passed.')

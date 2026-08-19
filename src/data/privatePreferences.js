@@ -111,24 +111,152 @@ export function derivePrivatePreferenceAnalysis({ reactions = [], events = [], t
   return { explicit, behavioral, byViewer, mechanisms, conflicts, differences, availabilityUncertain: behavioral.filter(item => item.signal === 'availability_uncertain') }
 }
 
-export function previewExplicitPreferenceImport(jsonText, { reactions = [], titleIds = new Set(), viewerIds = new Set(), fileName = null } = {}) {
+function normalizeReferenceTitle(value) {
+  return String(value || '').toLocaleLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ')
+}
+
+function titleTypeForMediaType(mediaType) {
+  return mediaType === 'tv' ? 'series' : mediaType
+}
+
+function stableReferenceHash(value) {
+  let hash = 2166136261
+  for (const character of value) {
+    hash ^= character.codePointAt(0)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+function curatedTitleId(reference) {
+  const normalized = normalizeReferenceTitle(reference.title).replace(/ /g, '-').slice(0, 48) || 'untitled'
+  const identity = [normalizeReferenceTitle(reference.title), reference.year || '', reference.mediaType || '', reference.tmdbId || ''].join('|')
+  return `title:curated:${normalized}:${stableReferenceHash(identity)}`
+}
+
+function resolutionCandidates(resolutions) {
+  const latest = latestResolutionsByTitle(resolutions)
+  const byIdentity = new Map()
+  for (const [titleId, resolution] of latest) {
+    const candidate = resolution?.candidate
+    if (!candidate || !['manually-confirmed', 'confidently-resolved'].includes(resolution.status) || !candidate.provider || !candidate.externalId || !candidate.canonicalTitle || !candidate.mediaType) continue
+    const key = `${candidate.provider}:${candidate.externalId}`
+    const entry = byIdentity.get(key) || {
+      kind: 'canonical', titleIds: [], title: candidate.canonicalTitle, year: candidate.releaseYear || null,
+      mediaType: candidate.mediaType, tmdbId: candidate.provider === 'tmdb' ? String(candidate.externalId) : null,
+      provider: candidate.provider, externalId: String(candidate.externalId)
+    }
+    entry.titleIds.push(titleId)
+    byIdentity.set(key, entry)
+  }
+  return [...byIdentity.values()]
+}
+
+function localCandidates(titles, resolutions) {
+  return [
+    ...titles.map(title => ({
+      kind: 'title', titleIds: [title.id], title: title.title || title.originalTitle, year: title.releaseYear || title.year || null,
+      mediaType: title.type === 'series' ? 'tv' : title.type, tmdbId: title.externalIds?.tmdb ? String(title.externalIds.tmdb) : null
+    })),
+    ...resolutionCandidates(resolutions)
+  ].filter(candidate => candidate.title)
+}
+
+function resolveReference(reference, candidates) {
+  let matches = reference.tmdbId
+    ? candidates.filter(candidate => candidate.tmdbId === String(reference.tmdbId))
+    : candidates.filter(candidate => normalizeReferenceTitle(candidate.title) === normalizeReferenceTitle(reference.title))
+  if (reference.mediaType) matches = matches.filter(candidate => candidate.mediaType === reference.mediaType)
+  if (reference.year) matches = matches.filter(candidate => Number(candidate.year) === Number(reference.year))
+  const identities = new Map()
+  for (const match of matches) {
+    const key = match.tmdbId ? `tmdb:${match.tmdbId}` : (match.kind === 'canonical' ? `${match.provider}:${match.externalId}` : `title:${match.titleIds[0]}`)
+    identities.set(key, match)
+  }
+  const unique = [...identities.values()]
+  if (!unique.length) return { status: 'not-found', match: null }
+  if (unique.length !== 1) return { status: 'ambiguous', match: null }
+  return { status: unique[0].kind === 'title' ? 'resolved-local-title' : 'resolved-canonical-identity', match: unique[0] }
+}
+
+function curatedTitle(reference, matchedCanonical = null) {
+  const identity = matchedCanonical || {}
+  const normalizedReference = {
+    title: identity.title || reference.title,
+    year: identity.year || reference.year || null,
+    mediaType: identity.mediaType || reference.mediaType || null,
+    tmdbId: identity.tmdbId || reference.tmdbId || null
+  }
+  return {
+    id: curatedTitleId(normalizedReference), schemaVersion: 1,
+    type: titleTypeForMediaType(normalizedReference.mediaType) || 'unknown',
+    title: normalizedReference.title, originalTitle: reference.title,
+    releaseYear: normalizedReference.year,
+    externalIds: normalizedReference.tmdbId ? { tmdb: String(normalizedReference.tmdbId) } : {},
+    curatedReference: { kind: 'explicit-preference', ...normalizedReference },
+    provenance: { sourceId: 'source:manual', sourceRecordId: 'curated-explicit-preference' }
+  }
+}
+
+export function previewExplicitPreferenceImport(jsonText, { reactions = [], titles = [], titleIds = new Set(), resolutions = [], viewerIds = new Set(), fileName = null } = {}) {
   const parsed = JSON.parse(jsonText)
   if (parsed?.format !== 'tv-recommendations-explicit-preferences' || parsed.formatVersion !== 1 || !Array.isArray(parsed.records)) throw new TypeError('Not a supported explicit-preferences JSON file.')
   const latest = latestByViewerTitle(reactions)
   const existingIds = new Set(reactions.map(reaction => reaction.id))
+  const availableTitles = titles.length ? titles : [...titleIds].map(id => ({ id, title: id }))
+  const titleById = new Map(availableTitles.map(title => [title.id, title]))
+  const candidates = localCandidates(availableTitles, resolutions)
   const records = []
+  const createdTitles = []
+  const createdTitleIds = new Set()
+  const previewRecords = []
   const problems = []
   let duplicates = 0
   for (const [index, input] of parsed.records.entries()) {
-    if (!input || !viewerIds.has(input.viewerId) || !titleIds.has(input.titleId) || !['loved', 'liked', 'okay', 'disliked', 'abandoned', 'unknown'].includes(input.reaction)) {
-      problems.push(`Record ${index + 1} has an unknown viewer/title or reaction.`)
+    if (!input || !viewerIds.has(input.viewerId) || !['loved', 'liked', 'okay', 'disliked', 'abandoned', 'unknown'].includes(input.reaction)) {
+      problems.push(`Record ${index + 1} has an unknown viewer or reaction.`)
       continue
     }
+    let titleId = input.titleId
+    let resolution = null
+    let suppliedTitle = null
+    if (titleId) {
+      if (!titleById.has(titleId)) {
+        problems.push(`Record ${index + 1} references an unknown private title ID.`)
+        previewRecords.push({ index, suppliedTitle: null, status: 'unknown-title-id', reaction: input.reaction, mechanisms: input.mechanisms || null })
+        continue
+      }
+      resolution = { status: 'title-id', match: { kind: 'title', titleIds: [titleId], title: titleById.get(titleId).title } }
+    } else {
+      suppliedTitle = typeof input.title === 'string' ? input.title.trim() : ''
+      const reference = { title: suppliedTitle, year: Number.isInteger(input.year) ? input.year : null, mediaType: ['movie', 'tv'].includes(input.mediaType) ? input.mediaType : null, tmdbId: input.tmdbId ?? input.externalIds?.tmdb ?? null }
+      if (!reference.title) {
+        problems.push(`Record ${index + 1} requires titleId or a non-empty title.`)
+        previewRecords.push({ index, suppliedTitle: null, status: 'missing-title-reference', reaction: input.reaction, mechanisms: input.mechanisms || null })
+        continue
+      }
+      resolution = resolveReference(reference, candidates)
+      if (resolution.status === 'ambiguous') {
+        problems.push(`Record ${index + 1} has multiple plausible local title matches and needs resolution.`)
+        previewRecords.push({ index, suppliedTitle, status: 'ambiguous', reaction: input.reaction, mechanisms: input.mechanisms || null })
+        continue
+      }
+      if (resolution.status === 'resolved-local-title') titleId = resolution.match.titleIds[0]
+      else {
+        const title = curatedTitle(reference, resolution.match)
+        titleId = title.id
+        if (!titleById.has(title.id) && !createdTitleIds.has(title.id)) {
+          createdTitles.push(title)
+          createdTitleIds.add(title.id)
+          titleById.set(title.id, title)
+        }
+      }
+    }
     if (input.id && existingIds.has(input.id)) { duplicates += 1; continue }
-    const previous = latest.get(`${input.viewerId}:${input.titleId}`)
+    const previous = latest.get(`${input.viewerId}:${titleId}`)
     if (previous?.reaction === input.reaction) { duplicates += 1; continue }
     const record = {
-      id: input.id || `rct_${crypto.randomUUID()}`, schemaVersion: 1, viewerId: input.viewerId, titleId: input.titleId,
+      id: input.id || `rct_${crypto.randomUUID()}`, schemaVersion: 1, viewerId: input.viewerId, titleId,
       reaction: input.reaction, strength: Number.isFinite(input.strength) ? input.strength : 1,
       mechanisms: { positive: [...new Set(input.mechanisms?.positive || [])], negative: [...new Set(input.mechanisms?.negative || [])] },
       note: typeof input.note === 'string' ? input.note.slice(0, 500) : null,
@@ -136,7 +264,8 @@ export function previewExplicitPreferenceImport(jsonText, { reactions = [], titl
       provenance: { sourceId: 'source:manual', sourceRecordId: input.provenance?.sourceRecordId || null, importFileName: fileName || null, importFormat: 'curated-explicit-preferences:v1' }
     }
     records.push(record)
-    latest.set(`${input.viewerId}:${input.titleId}`, record)
+    previewRecords.push({ index, suppliedTitle, status: resolution.status, resolvedIdentity: { title: resolution.match?.title || titleById.get(titleId)?.title, year: resolution.match?.year || titleById.get(titleId)?.releaseYear || null, mediaType: resolution.match?.mediaType || null, tmdbId: resolution.match?.tmdbId || titleById.get(titleId)?.externalIds?.tmdb || null }, reaction: record.reaction, mechanisms: record.mechanisms })
+    latest.set(`${input.viewerId}:${titleId}`, record)
   }
-  return { records, summary: { sourceRecords: parsed.records.length, importable: records.length, duplicates, problems } }
+  return { records, titles: createdTitles, previewRecords, summary: { sourceRecords: parsed.records.length, importable: records.length, curatedTitles: createdTitles.length, duplicates, problems } }
 }
