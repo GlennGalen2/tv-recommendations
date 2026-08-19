@@ -308,6 +308,89 @@ export async function createHistoryEvent(event) {
   return createPrivateRecord(PRIVATE_STORES.historyEvents, event)
 }
 
+export async function commitPrivateImport({ source, batch, titles = [], events = [] }) {
+  requireRecord(source, PRIVATE_STORES.sources)
+  requireRecord(batch, PRIVATE_STORES.importBatches)
+  rejectRawImportPayload(batch)
+
+  for (const title of titles) {
+    requireRecord(title, PRIVATE_STORES.titles)
+  }
+
+  for (const event of events) {
+    requireRecord(event, PRIVATE_STORES.historyEvents)
+  }
+
+  const database = await openPrivateStore()
+  const transaction = database.transaction([
+    PRIVATE_STORES.sources,
+    PRIVATE_STORES.importBatches,
+    PRIVATE_STORES.titles,
+    PRIVATE_STORES.historyEvents
+  ], 'readwrite')
+  const sources = transaction.objectStore(PRIVATE_STORES.sources)
+  const batches = transaction.objectStore(PRIVATE_STORES.importBatches)
+  const titleStore = transaction.objectStore(PRIVATE_STORES.titles)
+  const historyEvents = transaction.objectStore(PRIVATE_STORES.historyEvents)
+  const existingBatch = await requestAsPromise(batches.get(batch.id))
+
+  if (existingBatch) {
+    await transactionAsPromise(transaction)
+    return {
+      batchAlreadyImported: true,
+      importedTitles: 0,
+      importedEvents: 0,
+      skippedEvents: events.length
+    }
+  }
+
+  if (!await requestAsPromise(sources.get(source.id))) {
+    sources.add(source)
+  }
+
+  let importedTitles = 0
+  let importedEvents = 0
+  let skippedEvents = 0
+
+  for (const title of titles) {
+    if (!await requestAsPromise(titleStore.get(title.id))) {
+      titleStore.add(title)
+      importedTitles += 1
+    }
+  }
+
+  for (const event of events) {
+    if (await requestAsPromise(historyEvents.get(event.id))) {
+      skippedEvents += 1
+      continue
+    }
+
+    historyEvents.add({
+      ...event,
+      provenance: {
+        ...event.provenance,
+        importBatchId: batch.id
+      }
+    })
+    importedEvents += 1
+  }
+
+  batches.add({
+    ...batch,
+    recordCount: importedEvents,
+    recognizedRowCount: events.length,
+    skippedDuplicateCount: skippedEvents
+  })
+  await transactionAsPromise(transaction)
+
+  return {
+    batchAlreadyImported: false,
+    importedTitles,
+    importedEvents,
+    skippedEvents
+  }
+}
+
 export async function createReaction(reaction) {
   return createPrivateRecord(PRIVATE_STORES.reactions, reaction)
 }

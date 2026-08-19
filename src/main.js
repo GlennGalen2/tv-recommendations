@@ -11,6 +11,7 @@ import {
   readPrivateRecord,
   supersedeReaction
 } from './data/privateStore.js'
+import { createNetflixImportPanel } from './ui/netflixImportPanel.js'
 
 const titlesById = new Map(
   catalog.titles.map(title => [title.id, title])
@@ -25,6 +26,11 @@ let privateDemoState = {
   watchedTitleIds: new Set(),
   reactionsByTitle: new Map()
 }
+
+const netflixImportPanel = createNetflixImportPanel({
+  requestRender: render,
+  onImportComplete: refreshPrivateDemoState
+})
 
 const shows = recommendationData.recommendations.map(recommendation => {
   const title = titlesById.get(recommendation.titleId)
@@ -393,6 +399,8 @@ function render() {
         ${shows.map(show => createCard(show, state)).join('')}
       </section>
 
+      ${netflixImportPanel.render(privateDemoState.status === 'ready')}
+
       <section class="recent-section">
 
         <div class="section-heading">
@@ -427,6 +435,8 @@ function render() {
       )
     })
   })
+
+  netflixImportPanel.bind(privateDemoState.status === 'ready')
 }
 
 render()
