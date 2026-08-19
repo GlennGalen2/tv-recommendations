@@ -26,7 +26,7 @@ const seriesCandidates = rankIdentityCandidates(seriesQuery, [
   { provider: 'synthetic-provider', externalId: 'series-1', mediaType: 'series', canonicalTitle: 'Orbit Station' }
 ])
 assert.equal(seriesCandidates[0].score, 0.8)
-assert.equal(confidenceTier(seriesCandidates[0].score), 'unresolved')
+assert.equal(confidenceTier(seriesCandidates[0].score), 'review-required')
 
 const episodeQuery = createIdentityMatchQuery(
   { title: 'Orbit Station', type: 'series' },

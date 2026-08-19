@@ -78,7 +78,7 @@ be needed. No provider key or network integration exists today.
 Proposed automation policy (not enabled): automatically accept only a score of
 at least `0.995` when normalized title, known type, and a second independent
 identifier agree (release year or fully matching series/season/episode
-structure), with no competing candidate. Scores from `0.85` through `0.994`
+structure), with no competing candidate. Scores from `0.75` through `0.994`
 remain review-required; lower scores stay unresolved. Title-text similarity by
 itself never crosses either threshold.
 

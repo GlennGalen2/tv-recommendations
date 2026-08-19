@@ -94,6 +94,6 @@ export function rankIdentityCandidates(query, candidates = []) {
 
 export function confidenceTier(score) {
   if (score >= 0.995) return 'automatic-eligible'
-  if (score >= 0.85) return 'review-required'
+  if (score >= 0.75) return 'review-required'
   return 'unresolved'
 }
