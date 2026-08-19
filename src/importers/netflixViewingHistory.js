@@ -1,9 +1,7 @@
 const SOURCE_ID = 'source:netflix'
 const IMPORTER_VERSION = 'netflix-viewing-history:v1'
-
-function normalizeText(value) {
-  return value.replace(/\s+/g, ' ').trim()
-}
+import { normalizeText, parseCsvRows } from './csv.js'
+import { buildViewingHistoryImportPreview } from './importPreview.js'
 
 function slugify(value) {
   return normalizeText(value)
@@ -11,59 +9,6 @@ function slugify(value) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     || 'untitled'
-}
-
-function csvRows(text) {
-  const rows = []
-  let blankRows = 0
-  let row = []
-  let value = ''
-  let quoted = false
-
-  function finishRow() {
-    row.push(value)
-    if (row.length === 1 && !row[0].trim()) {
-      blankRows += 1
-    } else {
-      rows.push(row)
-    }
-    row = []
-    value = ''
-  }
-
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index]
-
-    if (character === '"') {
-      if (quoted && text[index + 1] === '"') {
-        value += '"'
-        index += 1
-      } else {
-        quoted = !quoted
-      }
-    } else if (character === ',' && !quoted) {
-      row.push(value)
-      value = ''
-    } else if ((character === '\n' || character === '\r') && !quoted) {
-      if (character === '\r' && text[index + 1] === '\n') {
-        index += 1
-      }
-
-      finishRow()
-    } else {
-      value += character
-    }
-  }
-
-  if (quoted) {
-    throw new Error('The CSV contains an unterminated quoted value.')
-  }
-
-  if (row.length || value.length) {
-    finishRow()
-  }
-
-  return { rows, blankRows }
 }
 
 function headerIndex(headers, name) {
@@ -288,7 +233,7 @@ export async function parseNetflixViewingHistoryCsv(csvText, options) {
     throw new TypeError('A viewerId is required for a Netflix import.')
   }
 
-  const parsedRows = csvRows(csvText)
+  const parsedRows = parseCsvRows(csvText)
   const rows = parsedRows.rows
 
   if (!rows.length) {
@@ -455,26 +400,5 @@ export async function parseNetflixViewingHistoryCsv(csvText, options) {
 }
 
 export function buildNetflixImportPreview(parsedImport, existing) {
-  const existingEventIds = existing?.eventIds || new Set()
-  const existingBatchIds = existing?.batchIds || new Set()
-  const batchAlreadyImported = existingBatchIds.has(parsedImport.batch.id)
-  const duplicateEvents = batchAlreadyImported
-    ? parsedImport.events.length
-    : parsedImport.events.filter(event => existingEventIds.has(event.id)).length
-  const newEvents = batchAlreadyImported
-    ? []
-    : parsedImport.events.filter(event => !existingEventIds.has(event.id))
-  const newTitleIds = new Set(newEvents.map(event => event.titleId))
-
-  return {
-    ...parsedImport,
-    newEvents,
-    newTitles: parsedImport.titles.filter(title => newTitleIds.has(title.id)),
-    preview: {
-      ...parsedImport.summary,
-      batchAlreadyImported,
-      duplicateEvents,
-      newEvents: newEvents.length
-    }
-  }
+  return buildViewingHistoryImportPreview(parsedImport, existing)
 }

@@ -12,6 +12,7 @@ import {
   supersedeReaction
 } from './data/privateStore.js'
 import { createNetflixImportPanel } from './ui/netflixImportPanel.js'
+import { createAmazonPrimeImportPanel } from './ui/amazonPrimeImportPanel.js'
 import { createPrivateBackupPanel } from './ui/privateBackupPanel.js'
 
 const titlesById = new Map(
@@ -29,6 +30,11 @@ let privateDemoState = {
 }
 
 const netflixImportPanel = createNetflixImportPanel({
+  requestRender: render,
+  onImportComplete: refreshPrivateDemoState
+})
+
+const amazonPrimeImportPanel = createAmazonPrimeImportPanel({
   requestRender: render,
   onImportComplete: refreshPrivateDemoState
 })
@@ -407,6 +413,8 @@ function render() {
 
       ${netflixImportPanel.render(privateDemoState.status === 'ready')}
 
+      ${amazonPrimeImportPanel.render(privateDemoState.status === 'ready')}
+
       ${privateBackupPanel.render(privateDemoState.status === 'ready')}
 
       <section class="recent-section">
@@ -445,6 +453,7 @@ function render() {
   })
 
   netflixImportPanel.bind(privateDemoState.status === 'ready')
+  amazonPrimeImportPanel.bind(privateDemoState.status === 'ready')
   privateBackupPanel.bind(privateDemoState.status === 'ready')
 }
 
