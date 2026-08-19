@@ -49,6 +49,10 @@ const REACTION_VALUES = new Set([
   'abandoned',
   'unknown'
 ])
+const SYNTHETIC_DEMO_REACTION_PROVENANCE = Object.freeze({
+  sourceId: 'source:manual',
+  sourceRecordId: 'private-demo-ui'
+})
 
 let databasePromise
 
@@ -431,6 +435,57 @@ function recordReferencesTitle(record, titleId, seen = new Set()) {
   if (seen.has(record)) return false
   seen.add(record)
   return Object.values(record).some(value => recordReferencesTitle(value, titleId, seen))
+}
+
+export async function getPrivateReactionAudit(title) {
+  if (typeof title !== 'string' || !title.trim()) throw new TypeError('An exact title is required for a reaction audit.')
+  const [reactions, titles, viewers] = await Promise.all([
+    listPrivateRecords(PRIVATE_STORES.reactions),
+    listPrivateRecords(PRIVATE_STORES.titles),
+    listPrivateRecords(PRIVATE_STORES.viewers)
+  ])
+  const titlesById = new Map(titles.map(record => [record.id, record]))
+  const viewersById = new Map(viewers.map(record => [record.id, record]))
+  const superseded = new Set(reactions.map(record => record.supersedesReactionId).filter(Boolean))
+  return reactions.filter(record => titlesById.get(record.titleId)?.title === title.trim()).map(record => ({
+    ...record,
+    current: !superseded.has(record.id),
+    title: titlesById.get(record.titleId)?.title || null,
+    viewer: viewersById.get(record.viewerId)?.displayName || record.viewerId
+  })).sort((left, right) => left.recordedAt.localeCompare(right.recordedAt))
+}
+
+export async function removeConfirmedSyntheticDemoReaction(reactionId, { database: providedDatabase } = {}) {
+  if (typeof reactionId !== 'string' || !reactionId.trim()) throw new TypeError('A reaction id is required for removal.')
+
+  const database = providedDatabase || await openPrivateStore()
+  const transaction = database.transaction(BACKUP_STORES, 'readwrite')
+  const completion = transactionAsPromise(transaction)
+  const reactions = transaction.objectStore(PRIVATE_STORES.reactions)
+  const titles = transaction.objectStore(PRIVATE_STORES.titles)
+  const reaction = await requestAsPromise(reactions.get(reactionId))
+  if (!reaction || Object.entries(SYNTHETIC_DEMO_REACTION_PROVENANCE).some(([key, value]) => reaction.provenance?.[key] !== value)) {
+    await completion
+    throw new Error('The requested reaction no longer matches the confirmed provenance.')
+  }
+
+  const allStores = Object.values(PRIVATE_STORES)
+  const allRecords = Object.fromEntries(await Promise.all(allStores.map(async storeName => [
+    storeName,
+    await requestAsPromise(transaction.objectStore(storeName).getAll())
+  ])))
+  const titleId = reaction.titleId
+  const otherRecords = allStores.flatMap(storeName => {
+    const records = allRecords[storeName]
+    if (storeName === PRIVATE_STORES.reactions) return records.filter(record => record.id !== reaction.id)
+    if (storeName === PRIVATE_STORES.titles) return records.filter(record => record.id !== titleId)
+    return records
+  })
+  const removeTitle = !otherRecords.some(record => recordReferencesTitle(record, titleId))
+  reactions.delete(reaction.id)
+  if (removeTitle) titles.delete(titleId)
+  await completion
+  return { removedReactionId: reaction.id, removedTitleId: removeTitle ? titleId : null }
 }
 
 export async function getPrivateImportBatches() {

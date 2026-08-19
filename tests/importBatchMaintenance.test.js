@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import {
   PRIVATE_STORES,
-  removePrivateImportBatch
+  removePrivateImportBatch,
+  removeConfirmedSyntheticDemoReaction
 } from '../src/data/privateStore.js'
 
 const storeNames = Object.values(PRIVATE_STORES)
@@ -104,5 +105,26 @@ await assert.rejects(
   /transaction failure/
 )
 assert.deepEqual(failingDatabase.snapshot(), beforeFailure)
+
+const reactionRecords = records()
+reactionRecords.titles.push({ id: 'title:synthetic-demo', schemaVersion: 1 })
+reactionRecords.reactions.push({
+  id: 'reaction:synthetic-demo', schemaVersion: 1, titleId: 'title:synthetic-demo', viewerId: 'viewer-1', reaction: 'liked',
+  provenance: { sourceId: 'source:manual', sourceRecordId: 'private-demo-ui' }
+})
+const reactionDatabase = createMemoryDatabase(reactionRecords)
+const reactionResult = await removeConfirmedSyntheticDemoReaction('reaction:synthetic-demo', { database: reactionDatabase })
+assert.deepEqual(reactionResult, { removedReactionId: 'reaction:synthetic-demo', removedTitleId: 'title:synthetic-demo' })
+assert.equal(reactionDatabase.snapshot().reactions.some(record => record.id === 'reaction:synthetic-demo'), false)
+assert.equal(reactionDatabase.snapshot().titles.some(record => record.id === 'title:synthetic-demo'), false)
+
+const protectedReactionRecords = structuredClone(reactionRecords)
+protectedReactionRecords.reactions.find(record => record.id === 'reaction:synthetic-demo').provenance.sourceRecordId = 'other-source'
+const protectedReactionDatabase = createMemoryDatabase(protectedReactionRecords)
+await assert.rejects(
+  removeConfirmedSyntheticDemoReaction('reaction:synthetic-demo', { database: protectedReactionDatabase }),
+  /confirmed provenance/
+)
+assert.deepEqual(protectedReactionDatabase.snapshot(), protectedReactionRecords)
 
 console.log('Import batch maintenance checks passed.')
