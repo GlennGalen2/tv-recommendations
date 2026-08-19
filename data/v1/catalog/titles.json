@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "dataClassification": "public-demo",
+  "titles": [
+    {
+      "id": "title:harbor-signal:2024",
+      "type": "series",
+      "title": "Harbor Signal",
+      "releaseYear": 2024,
+      "genres": ["mystery", "drama"],
+      "externalIds": {},
+      "series": { "status": "returning", "seasonCount": 1 }
+    },
+    {
+      "id": "title:the-last-orbit:2025",
+      "type": "movie",
+      "title": "The Last Orbit",
+      "releaseYear": 2025,
+      "genres": ["science-fiction", "mystery", "drama"],
+      "runtimeMinutes": 112,
+      "externalIds": {}
+    },
+    {
+      "id": "title:winter-archive:2023",
+      "type": "series",
+      "title": "Winter Archive",
+      "releaseYear": 2023,
+      "genres": ["historical", "mystery"],
+      "externalIds": {},
+      "series": { "status": "ended", "seasonCount": 2 }
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "dataClassification": "public-demo",
+  "viewers": [
+    { "id": "viewer-1", "displayName": "Viewer 1", "active": true },
+    { "id": "viewer-2", "displayName": "Viewer 2", "active": true }
+  ]
+}

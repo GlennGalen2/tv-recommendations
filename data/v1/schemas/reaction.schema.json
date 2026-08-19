@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/tvapp/v1/reaction.schema.json",
+  "title": "Append-only explicit viewer reaction",
+  "type": "object",
+  "required": ["id", "viewerId", "titleId", "reaction", "recordedAt", "supersedesReactionId", "provenance"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^rct_[A-Za-z0-9]+$" },
+    "viewerId": { "type": "string" },
+    "titleId": { "type": "string" },
+    "reaction": { "enum": ["loved", "liked", "okay", "disliked", "abandoned", "unknown"] },
+    "recordedAt": { "type": "string", "format": "date-time" },
+    "supersedesReactionId": { "type": ["string", "null"] },
+    "provenance": {
+      "type": "object",
+      "required": ["sourceId"],
+      "properties": {
+        "sourceId": { "type": "string" },
+        "sourceRecordId": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

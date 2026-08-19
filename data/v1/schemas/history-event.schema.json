@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/tvapp/v1/history-event.schema.json",
+  "title": "Viewing-history observation",
+  "type": "object",
+  "required": ["id", "viewerIds", "titleId", "eventType", "mediaScope", "occurredAt", "observations", "provenance"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^evt_[A-Za-z0-9]+$" },
+    "viewerIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+    "titleId": { "type": ["string", "null"] },
+    "eventType": { "enum": ["playback", "completed"] },
+    "mediaScope": {
+      "type": "object",
+      "required": ["level"],
+      "properties": {
+        "level": { "enum": ["title", "episode"] },
+        "seasonNumber": { "type": "integer", "minimum": 0 },
+        "episodeNumber": { "type": "integer", "minimum": 0 },
+        "episodeTitle": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "observations": {
+      "type": "object",
+      "properties": {
+        "sourceTitle": { "type": "string" },
+        "positionSeconds": { "type": "number", "minimum": 0 },
+        "durationSeconds": { "type": "number", "exclusiveMinimum": 0 },
+        "completionPercent": { "type": "number", "minimum": 0, "maximum": 100 }
+      },
+      "additionalProperties": true
+    },
+    "provenance": { "$ref": "#/$defs/provenance" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mediaScope": {
+            "properties": { "level": { "const": "episode" } },
+            "required": ["level"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "mediaScope": { "required": ["seasonNumber", "episodeNumber"] }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "provenance": {
+      "type": "object",
+      "required": ["sourceId"],
+      "properties": {
+        "sourceId": { "type": "string" },
+        "importBatchId": { "type": ["string", "null"] },
+        "sourceRecordId": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

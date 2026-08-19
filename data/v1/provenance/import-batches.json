@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "dataClassification": "public-demo",
+  "batches": [
+    {
+      "id": "import:demo:2026-08-19:001",
+      "sourceId": "source:demo",
+      "importedAt": "2026-08-19T12:00:00Z",
+      "sourceFileName": "synthetic-demo-export.json",
+      "sourceHash": null,
+      "importerVersion": "demo:v1",
+      "recordCount": 3,
+      "synthetic": true
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "dataClassification": "public-demo",
+  "evidence": [
+    {
+      "id": "evidence:viewer-1:patient-mysteries:001",
+      "viewerId": "viewer-1",
+      "evidenceType": "inferred",
+      "feature": { "type": "theme", "value": "patient-mysteries" },
+      "direction": "positive",
+      "strength": 0.8,
+      "confidence": 0.7,
+      "explanation": "Synthetic reactions suggest a preference for patient mystery storytelling.",
+      "basedOn": [
+        { "recordType": "reaction", "recordId": "rct_01JDEMO000000000000000002", "weight": 1 }
+      ],
+      "derivation": {
+        "method": "rule",
+        "version": "demo-preference-rules:v1",
+        "generatedAt": "2026-08-19T12:05:00Z"
+      }
+    },
+    {
+      "id": "evidence:viewer-2:slow-burn-uncertain:001",
+      "viewerId": "viewer-2",
+      "evidenceType": "inferred",
+      "feature": { "type": "tone", "value": "slow-burn" },
+      "direction": "neutral",
+      "strength": 0.2,
+      "confidence": 0.4,
+      "explanation": "Synthetic evidence is insufficient to infer a strong slow-burn preference.",
+      "basedOn": [
+        { "recordType": "reaction", "recordId": "rct_01JDEMO000000000000000003", "weight": 1 }
+      ],
+      "derivation": {
+        "method": "rule",
+        "version": "demo-preference-rules:v1",
+        "generatedAt": "2026-08-19T12:05:00Z"
+      }
+    }
+  ]
+}

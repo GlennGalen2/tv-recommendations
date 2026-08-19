@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "dataClassification": "public-demo",
+  "groups": [
+    {
+      "id": "group:both-viewers",
+      "displayName": "Both viewers",
+      "viewerIds": ["viewer-1", "viewer-2"],
+      "active": true
+    }
+  ]
+}

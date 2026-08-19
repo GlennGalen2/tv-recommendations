@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "dataClassification": "public-demo",
+  "events": [
+    {
+      "id": "evt_01JDEMO000000000000000001",
+      "viewerIds": ["viewer-1", "viewer-2"],
+      "titleId": "title:harbor-signal:2024",
+      "eventType": "completed",
+      "mediaScope": { "level": "title" },
+      "occurredAt": "2026-07-12T20:15:00Z",
+      "observations": { "sourceTitle": "Harbor Signal" },
+      "provenance": {
+        "sourceId": "source:demo",
+        "importBatchId": "import:demo:2026-08-19:001",
+        "sourceRecordId": "demo-row-1"
+      }
+    },
+    {
+      "id": "evt_01JDEMO000000000000000002",
+      "viewerIds": ["viewer-1"],
+      "titleId": "title:winter-archive:2023",
+      "eventType": "playback",
+      "mediaScope": { "level": "episode", "seasonNumber": 1, "episodeNumber": 2 },
+      "occurredAt": "2026-07-14T19:30:00Z",
+      "observations": { "sourceTitle": "Winter Archive: S1 E2" },
+      "provenance": {
+        "sourceId": "source:demo",
+        "importBatchId": "import:demo:2026-08-19:001",
+        "sourceRecordId": "demo-row-2"
+      }
+    },
+    {
+      "id": "evt_01JDEMO000000000000000003",
+      "viewerIds": ["viewer-2"],
+      "titleId": "title:the-last-orbit:2025",
+      "eventType": "playback",
+      "mediaScope": { "level": "title" },
+      "occurredAt": "2026-07-20T21:00:00Z",
+      "observations": {
+        "sourceTitle": "The Last Orbit",
+        "positionSeconds": 2520,
+        "durationSeconds": 6720,
+        "completionPercent": 37.5
+      },
+      "provenance": {
+        "sourceId": "source:demo",
+        "importBatchId": "import:demo:2026-08-19:001",
+        "sourceRecordId": "demo-row-3"
+      }
+    }
+  ]
+}

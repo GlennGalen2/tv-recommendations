@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/tvapp/v1/preference-evidence.schema.json",
+  "title": "Inferred preference evidence",
+  "type": "object",
+  "required": ["id", "viewerId", "evidenceType", "feature", "direction", "strength", "confidence", "basedOn", "derivation"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^evidence:[a-z0-9:-]+$" },
+    "viewerId": { "type": "string" },
+    "evidenceType": { "const": "inferred" },
+    "feature": {
+      "type": "object",
+      "required": ["type", "value"],
+      "properties": { "type": { "type": "string" }, "value": { "type": "string" } },
+      "additionalProperties": true
+    },
+    "direction": { "enum": ["positive", "negative", "neutral"] },
+    "strength": { "type": "number", "minimum": 0, "maximum": 1 },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "explanation": { "type": "string" },
+    "basedOn": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["recordType", "recordId", "weight"],
+        "properties": {
+          "recordType": { "enum": ["history-event", "reaction", "preference-evidence"] },
+          "recordId": { "type": "string" },
+          "weight": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "derivation": {
+      "type": "object",
+      "required": ["method", "version", "generatedAt"],
+      "properties": {
+        "method": { "enum": ["rule", "model", "manual-inference"] },
+        "version": { "type": "string" },
+        "generatedAt": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

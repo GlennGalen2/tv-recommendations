@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "dataClassification": "public-demo",
+  "reactions": [
+    {
+      "id": "rct_01JDEMO000000000000000001",
+      "viewerId": "viewer-1",
+      "titleId": "title:harbor-signal:2024",
+      "reaction": "liked",
+      "recordedAt": "2026-07-12T22:00:00Z",
+      "supersedesReactionId": null,
+      "provenance": { "sourceId": "source:demo", "sourceRecordId": "demo-reaction-1" }
+    },
+    {
+      "id": "rct_01JDEMO000000000000000002",
+      "viewerId": "viewer-1",
+      "titleId": "title:harbor-signal:2024",
+      "reaction": "loved",
+      "recordedAt": "2026-07-13T09:00:00Z",
+      "supersedesReactionId": "rct_01JDEMO000000000000000001",
+      "provenance": { "sourceId": "source:demo", "sourceRecordId": "demo-reaction-2" }
+    },
+    {
+      "id": "rct_01JDEMO000000000000000003",
+      "viewerId": "viewer-2",
+      "titleId": "title:harbor-signal:2024",
+      "reaction": "okay",
+      "recordedAt": "2026-07-12T22:05:00Z",
+      "supersedesReactionId": null,
+      "provenance": { "sourceId": "source:demo", "sourceRecordId": "demo-reaction-3" }
+    }
+  ]
+}

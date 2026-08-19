@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "dataClassification": "public-demo",
+  "recommendations": [
+    {
+      "id": "recommendation:both:the-last-orbit:2026-08-19",
+      "titleId": "title:the-last-orbit:2025",
+      "target": { "kind": "group", "id": "group:both-viewers" },
+      "viewerScores": [
+        { "viewerId": "viewer-1", "score": 91, "evidenceIds": ["evidence:viewer-1:patient-mysteries:001"] },
+        { "viewerId": "viewer-2", "score": 72, "evidenceIds": ["evidence:viewer-2:slow-burn-uncertain:001"] }
+      ],
+      "jointScore": {
+        "value": 76,
+        "method": "demo-disagreement-aware:v1",
+        "disagreementPenalty": 5
+      },
+      "explanation": "A thoughtful science-fiction drama with a strong mystery, with some uncertainty for Viewer 2.",
+      "workflowStatus": "unwatched",
+      "generatedAt": "2026-08-19T12:10:00Z",
+      "generation": { "method": "rule", "version": "demo-recommendation-rules:v1" },
+      "provenance": { "sourceId": "source:demo", "sourceRecordId": "demo-recommendation-1" }
+    },
+    {
+      "id": "recommendation:viewer-1:winter-archive:2026-08-19",
+      "titleId": "title:winter-archive:2023",
+      "target": { "kind": "viewer", "id": "viewer-1" },
+      "viewerScores": [
+        { "viewerId": "viewer-1", "score": 88, "evidenceIds": ["evidence:viewer-1:patient-mysteries:001"] }
+      ],
+      "jointScore": null,
+      "explanation": "A patient historical mystery aligned with Viewer 1's synthetic demo evidence.",
+      "workflowStatus": "saved",
+      "generatedAt": "2026-08-19T12:10:00Z",
+      "generation": { "method": "rule", "version": "demo-recommendation-rules:v1" },
+      "provenance": { "sourceId": "source:demo", "sourceRecordId": "demo-recommendation-2" }
+    }
+  ]
+}

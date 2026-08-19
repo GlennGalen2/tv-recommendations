@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/tvapp/v1/import-batch.schema.json",
+  "title": "Normalized import batch provenance",
+  "type": "object",
+  "required": ["id", "sourceId", "importedAt", "recordCount"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^import:[a-z0-9:-]+$" },
+    "sourceId": { "type": "string" },
+    "importedAt": { "type": "string", "format": "date-time" },
+    "sourceFileName": { "type": ["string", "null"] },
+    "sourceHash": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["algorithm", "value"],
+          "properties": {
+            "algorithm": { "enum": ["sha256"] },
+            "value": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "importerVersion": { "type": ["string", "null"] },
+    "recordCount": { "type": "integer", "minimum": 0 },
+    "synthetic": { "type": "boolean" }
+  },
+  "additionalProperties": true
+}

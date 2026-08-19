@@ -1,9 +1,35 @@
 import './style.css'
-import shows from '../data/recommendations.json'
+import catalog from '../data/v1/catalog/titles.json'
+import recommendationData from '../data/v1/recommendations/recommendations.json'
 
-function loadState() {
+const titlesById = new Map(
+  catalog.titles.map(title => [title.id, title])
+)
+
+const DEMO_UI_STATE_KEY = 'tv-app-demo-ui-state-v1'
+
+const shows = recommendationData.recommendations.map(recommendation => {
+  const title = titlesById.get(recommendation.titleId)
+  const score = recommendation.jointScore?.value
+    ?? recommendation.viewerScores[0].score
+
+  return {
+    id: recommendation.titleId,
+    title: title.title,
+    service: 'Synthetic demo title',
+    score,
+    reason: recommendation.explanation,
+    workflowStatus: recommendation.workflowStatus
+  }
+})
+
+// Temporary browser-local interaction state for the public demo. This is not
+// canonical viewing history or an append-only reaction record.
+function loadDemoUiState() {
   try {
-    const state = JSON.parse(localStorage.getItem('tv-app-state') || '{}')
+    const state = JSON.parse(
+      localStorage.getItem(DEMO_UI_STATE_KEY) || '{}'
+    )
 
     return state && typeof state === 'object' && !Array.isArray(state)
       ? state
@@ -13,16 +39,16 @@ function loadState() {
   }
 }
 
-function saveState(state) {
-  localStorage.setItem('tv-app-state', JSON.stringify(state))
+function saveDemoUiState(state) {
+  localStorage.setItem(DEMO_UI_STATE_KEY, JSON.stringify(state))
 }
 
-function ensureShowState(state, id) {
+function ensureDemoShowState(state, id, workflowStatus = 'unwatched') {
   if (!state[id]) {
     state[id] = {
       watched: false,
       rating: null,
-      saved: false
+      saved: workflowStatus === 'saved'
     }
   }
 
@@ -30,8 +56,8 @@ function ensureShowState(state, id) {
 }
 
 function updateShow(id, action) {
-  const state = loadState()
-  const showState = ensureShowState(state, id)
+  const state = loadDemoUiState()
+  const showState = ensureDemoShowState(state, id)
 
   if (action === 'watched') {
     showState.watched = !showState.watched
@@ -51,7 +77,7 @@ function updateShow(id, action) {
     showState.saved = !showState.saved
   }
 
-  saveState(state)
+  saveDemoUiState(state)
   render()
 }
 
@@ -60,7 +86,11 @@ function buttonClass(active) {
 }
 
 function createCard(show, state) {
-  const showState = ensureShowState(state, show.id)
+  const showState = ensureDemoShowState(
+    state,
+    show.id,
+    show.workflowStatus
+  )
 
   return `
     <article class="show-card">
@@ -138,7 +168,7 @@ function getRecentlyWatched(state) {
 }
 
 function createRecentItem(show, state) {
-  const showState = ensureShowState(state, show.id)
+  const showState = ensureDemoShowState(state, show.id)
 
   let result = 'Not rated yet'
 
@@ -169,7 +199,7 @@ function createRecentItem(show, state) {
 }
 
 function render() {
-  const state = loadState()
+  const state = loadDemoUiState()
   const recentlyWatched = getRecentlyWatched(state)
 
   document.querySelector('#app').innerHTML = `
@@ -188,7 +218,7 @@ function render() {
 
       <section class="section-heading">
         <h2>Recommended for us</h2>
-        <p>Ranked by predicted fit.</p>
+        <p>Ranked by synthetic demo evidence.</p>
       </section>
 
       <section class="show-list">
@@ -199,7 +229,7 @@ function render() {
 
         <div class="section-heading">
           <h2>Recently watched</h2>
-          <p>Anything you mark Watched appears here.</p>
+          <p>Demo-only selections stored in this browser; not canonical history.</p>
         </div>
 
         <div class="recent-list">

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/tvapp/v1/recommendation.schema.json",
+  "title": "Generated or manually curated recommendation",
+  "type": "object",
+  "required": ["id", "titleId", "target", "viewerScores", "jointScore", "explanation", "workflowStatus", "generatedAt", "generation", "provenance"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^recommendation:[a-z0-9:-]+$" },
+    "titleId": { "type": "string" },
+    "target": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": { "kind": { "enum": ["viewer", "group"] }, "id": { "type": "string" } },
+      "additionalProperties": false
+    },
+    "viewerScores": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["viewerId", "score", "evidenceIds"],
+        "properties": {
+          "viewerId": { "type": "string" },
+          "score": { "type": "number", "minimum": 0, "maximum": 100 },
+          "evidenceIds": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+        },
+        "additionalProperties": true
+      }
+    },
+    "jointScore": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["value", "method", "disagreementPenalty"],
+          "properties": {
+            "value": { "type": "number", "minimum": 0, "maximum": 100 },
+            "method": { "type": "string", "not": { "const": "simple-average" } },
+            "disagreementPenalty": { "type": "number", "minimum": 0 }
+          },
+          "additionalProperties": true
+        }
+      ]
+    },
+    "explanation": { "type": "string", "minLength": 1 },
+    "workflowStatus": { "enum": ["unwatched", "saved", "dismissed"] },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "generation": {
+      "type": "object",
+      "required": ["method", "version"],
+      "properties": {
+        "method": { "enum": ["rule", "model", "manual"] },
+        "version": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["sourceId"],
+      "properties": {
+        "sourceId": { "type": "string" },
+        "sourceRecordId": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

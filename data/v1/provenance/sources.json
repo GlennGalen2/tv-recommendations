@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "dataClassification": "public-demo",
+  "sources": [
+    { "id": "source:netflix", "name": "Netflix", "kind": "streaming-service" },
+    { "id": "source:amazon", "name": "Amazon", "kind": "streaming-service" },
+    { "id": "source:apple-tv", "name": "Apple TV", "kind": "streaming-service" },
+    { "id": "source:manual", "name": "Manual entry", "kind": "manual" },
+    { "id": "source:demo", "name": "Synthetic demo data", "kind": "generated" }
+  ]
+}

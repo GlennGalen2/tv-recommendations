@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/tvapp/v1/source.schema.json",
+  "title": "Provenance source",
+  "type": "object",
+  "required": ["id", "name", "kind"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^source:[a-z0-9-]+$" },
+    "name": { "type": "string", "minLength": 1 },
+    "kind": { "enum": ["streaming-service", "manual", "generated", "other"] },
+    "importer": { "type": ["string", "null"] }
+  },
+  "additionalProperties": true
+}
