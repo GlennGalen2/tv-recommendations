@@ -25,6 +25,12 @@ snapshot for a future user-directed backup or sync feature; it does not upload
 anything. Database upgrades create stores idempotently and close stale browser
 connections on version changes.
 
+TMDb API Read Access Tokens are kept separately by
+`src/data/tmdbCredentialStore.js`, in a distinct browser-local IndexedDB
+database. They are never part of `privateStore` records, backup exports,
+diagnostics, or public assets. A token must be configured independently on
+each browser/device and is intentionally not synchronized or backed up.
+
 ## Derived viewing analysis
 
 The private Viewing History Analysis is recomputed locally from immutable

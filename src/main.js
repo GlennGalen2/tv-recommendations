@@ -17,6 +17,7 @@ import { createPrivateBackupPanel } from './ui/privateBackupPanel.js'
 import { createViewingAnalysisPanel } from './ui/viewingAnalysisPanel.js'
 import { createImportBatchMaintenancePanel } from './ui/importBatchMaintenancePanel.js'
 import { createIdentityResolutionPanel } from './ui/identityResolutionPanel.js'
+import { createTmdbCredentialPanel } from './ui/tmdbCredentialPanel.js'
 
 const titlesById = new Map(
   catalog.titles.map(title => [title.id, title])
@@ -53,6 +54,7 @@ const importBatchMaintenancePanel = createImportBatchMaintenancePanel({
   onRemovalComplete: refreshPrivateDataViews
 })
 const identityResolutionPanel = createIdentityResolutionPanel({ requestRender: render })
+const tmdbCredentialPanel = createTmdbCredentialPanel({ requestRender: render })
 
 const shows = recommendationData.recommendations.map(recommendation => {
   const title = titlesById.get(recommendation.titleId)
@@ -153,7 +155,8 @@ async function refreshPrivateDataViews() {
     refreshPrivateDemoState(),
     viewingAnalysisPanel.refresh(),
     importBatchMaintenancePanel.refresh(),
-    identityResolutionPanel.refresh()
+    identityResolutionPanel.refresh(),
+    tmdbCredentialPanel.refresh()
   ])
 }
 
@@ -442,6 +445,8 @@ function render() {
 
       ${identityResolutionPanel.render(privateDemoState.status === 'ready')}
 
+      ${tmdbCredentialPanel.render(privateDemoState.status === 'ready')}
+
       <section class="recent-section">
 
         <div class="section-heading">
@@ -483,6 +488,7 @@ function render() {
   viewingAnalysisPanel.bind(privateDemoState.status === 'ready')
   importBatchMaintenancePanel.bind(privateDemoState.status === 'ready')
   identityResolutionPanel.bind(privateDemoState.status === 'ready')
+  tmdbCredentialPanel.bind(privateDemoState.status === 'ready')
 }
 
 render()
