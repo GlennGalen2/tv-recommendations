@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  base: '/tv-recommendations/',
+
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
@@ -15,11 +17,12 @@ export default defineConfig({
         background_color: '#10131a',
 
         display: 'standalone',
-        start_url: '/',
+        start_url: '/tv-recommendations/',
+        scope: '/tv-recommendations/',
 
         icons: [
           {
-            src: '/icon.svg',
+            src: 'icon.svg',
             sizes: 'any',
             type: 'image/svg+xml',
             purpose: 'any maskable'
