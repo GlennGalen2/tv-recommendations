@@ -4,78 +4,89 @@ const shows = [
   {
     id: 'night-manager',
     title: 'The Night Manager',
+    service: 'Prime / AMC+',
     score: 94,
-    genre: 'Espionage / Thriller',
-    service: 'Check service',
-    description:
-      'Serious international espionage with capable characters, moral stakes, strong performances, and relatively grounded tradecraft.'
+    reason:
+      'Strong espionage atmosphere, capable adults, moral stakes, and serious dialogue. Less exaggerated than many spy thrillers.'
   },
   {
     id: 'unforgotten',
     title: 'Unforgotten',
+    service: 'PBS / Prime',
     score: 93,
-    genre: 'Mystery / Crime',
-    service: 'Check service',
-    description:
-      'Patient British investigations built around character, accumulated evidence, and the consequences of long-buried crimes.'
+    reason:
+      'Patient mystery construction, accumulated evidence, strong character work, and emotionally credible consequences.'
   },
   {
     id: 'tehran',
     title: 'Tehran',
+    service: 'Apple TV+',
     score: 89,
-    genre: 'Espionage / Drama',
-    service: 'Check service',
-    description:
-      'Intelligence operations, conflicting loyalties, suspense, and complicated people operating under intense pressure.'
+    reason:
+      'Espionage, divided loyalties, evolving information, and competent characters under pressure.'
   },
   {
     id: 'babylon-berlin',
     title: 'Babylon Berlin',
+    service: 'Check availability',
     score: 87,
-    genre: 'Historical / Mystery',
-    service: 'Check service',
-    description:
-      'An ambitious historical mystery with political intrigue, evolving information, atmosphere, and a richly constructed world.'
+    reason:
+      'Complex historical mystery, political intrigue, strong atmosphere, and an unusually rich fictional world.'
   }
 ]
 
-function getRatings() {
-  return JSON.parse(localStorage.getItem('tv-ratings') || '{}')
+function loadState() {
+  return JSON.parse(localStorage.getItem('tv-app-state') || '{}')
 }
 
-function saveRatings(ratings) {
-  localStorage.setItem('tv-ratings', JSON.stringify(ratings))
+function saveState(state) {
+  localStorage.setItem('tv-app-state', JSON.stringify(state))
 }
 
-function setRating(showId, person, value) {
-  const ratings = getRatings()
-
-  if (!ratings[showId]) {
-    ratings[showId] = {}
+function ensureShowState(state, id) {
+  if (!state[id]) {
+    state[id] = {
+      watched: false,
+      rating: null,
+      saved: false
+    }
   }
 
-  ratings[showId][person] = value
-  saveRatings(ratings)
+  return state[id]
+}
+
+function updateShow(id, action) {
+  const state = loadState()
+  const showState = ensureShowState(state, id)
+
+  if (action === 'watched') {
+    showState.watched = !showState.watched
+  }
+
+  if (action === 'liked') {
+    showState.rating =
+      showState.rating === 'liked' ? null : 'liked'
+  }
+
+  if (action === 'disliked') {
+    showState.rating =
+      showState.rating === 'disliked' ? null : 'disliked'
+  }
+
+  if (action === 'saved') {
+    showState.saved = !showState.saved
+  }
+
+  saveState(state)
   render()
 }
 
-function ratingButton(showId, person, value, label, currentValue) {
-  const selected = currentValue === value ? 'selected' : ''
-
-  return `
-    <button
-      class="rating-button ${selected}"
-      data-show="${showId}"
-      data-person="${person}"
-      data-value="${value}"
-    >
-      ${label}
-    </button>
-  `
+function buttonClass(active) {
+  return active ? 'action-button active' : 'action-button'
 }
 
-function createCard(show, ratings) {
-  const showRatings = ratings[show.id] || {}
+function createCard(show, state) {
+  const showState = ensureShowState(state, show.id)
 
   return `
     <article class="show-card">
@@ -84,46 +95,63 @@ function createCard(show, ratings) {
         <span>${show.title.charAt(0)}</span>
       </div>
 
-      <div class="show-content">
+      <div class="show-body">
 
-        <div class="show-heading">
+        <div class="show-top">
+
           <div>
             <h2>${show.title}</h2>
-            <p class="genre">${show.genre}</p>
+            <p class="service">${show.service}</p>
           </div>
 
-          <div class="score">
+          <div class="match">
             <strong>${show.score}%</strong>
             <span>match</span>
           </div>
+
         </div>
 
-        <p class="description">
-          ${show.description}
-        </p>
-
-        <p class="service">
-          Streaming: <strong>${show.service}</strong>
-        </p>
-
-        <div class="rating-section">
-          <h3>Glenn</h3>
-
-          <div class="rating-row">
-            ${ratingButton(show.id, 'glenn', 'watched', 'Watched', showRatings.glenn)}
-            ${ratingButton(show.id, 'glenn', 'liked', 'Liked', showRatings.glenn)}
-            ${ratingButton(show.id, 'glenn', 'disliked', 'Not for me', showRatings.glenn)}
-          </div>
+        <div class="why-box">
+          <span class="why-label">WHY IT FITS</span>
+          <p>${show.reason}</p>
         </div>
 
-        <div class="rating-section">
-          <h3>Wife</h3>
+        <div class="actions">
 
-          <div class="rating-row">
-            ${ratingButton(show.id, 'wife', 'watched', 'Watched', showRatings.wife)}
-            ${ratingButton(show.id, 'wife', 'liked', 'Liked', showRatings.wife)}
-            ${ratingButton(show.id, 'wife', 'disliked', 'Not for me', showRatings.wife)}
-          </div>
+          <button
+            class="${buttonClass(showState.watched)}"
+            data-id="${show.id}"
+            data-action="watched"
+          >
+            ${showState.watched ? '✓ Watched' : 'Watched'}
+          </button>
+
+          <button
+            class="${buttonClass(showState.rating === 'liked')}"
+            data-id="${show.id}"
+            data-action="liked"
+          >
+            ${showState.rating === 'liked' ? '✓ Liked' : 'Liked'}
+          </button>
+
+          <button
+            class="${buttonClass(showState.rating === 'disliked')}"
+            data-id="${show.id}"
+            data-action="disliked"
+          >
+            ${showState.rating === 'disliked'
+              ? '✓ Not for us'
+              : 'Not for us'}
+          </button>
+
+          <button
+            class="${buttonClass(showState.saved)}"
+            data-id="${show.id}"
+            data-action="saved"
+          >
+            ${showState.saved ? '✓ Saved' : 'Save for later'}
+          </button>
+
         </div>
 
       </div>
@@ -131,43 +159,99 @@ function createCard(show, ratings) {
   `
 }
 
+function getRecentlyWatched(state) {
+  return shows.filter(show => state[show.id]?.watched)
+}
+
+function createRecentItem(show, state) {
+  const showState = ensureShowState(state, show.id)
+
+  let result = 'Not rated yet'
+
+  if (showState.rating === 'liked') {
+    result = 'Liked'
+  }
+
+  if (showState.rating === 'disliked') {
+    result = 'Not for us'
+  }
+
+  return `
+    <div class="recent-item">
+      <div>
+        <strong>${show.title}</strong>
+        <span>${result}</span>
+      </div>
+
+      <button
+        class="small-button"
+        data-id="${show.id}"
+        data-action="watched"
+      >
+        Undo watched
+      </button>
+    </div>
+  `
+}
+
 function render() {
-  const ratings = getRatings()
+  const state = loadState()
+  const recentlyWatched = getRecentlyWatched(state)
 
   document.querySelector('#app').innerHTML = `
     <main class="app-shell">
 
-      <header class="top-header">
+      <header class="app-header">
         <div>
           <h1>TV Recommendations</h1>
-          <p>Personal recommendations for Glenn & wife</p>
+          <p>What should we watch next?</p>
         </div>
 
-        <div class="prototype-label">
-          PWA prototype
+        <div class="app-badge">
+          Personal TV
         </div>
       </header>
 
-      <section class="recommendation-header">
-        <h2>Recommended for you</h2>
-        <p>
-          Ranked from what we currently know about your viewing preferences.
-        </p>
+      <section class="section-heading">
+        <h2>Recommended for us</h2>
+        <p>Ranked by predicted fit.</p>
       </section>
 
       <section class="show-list">
-        ${shows.map(show => createCard(show, ratings)).join('')}
+        ${shows.map(show => createCard(show, state)).join('')}
+      </section>
+
+      <section class="recent-section">
+
+        <div class="section-heading">
+          <h2>Recently watched</h2>
+          <p>Anything you mark Watched appears here.</p>
+        </div>
+
+        <div class="recent-list">
+          ${
+            recentlyWatched.length
+              ? recentlyWatched
+                  .map(show => createRecentItem(show, state))
+                  .join('')
+              : `
+                <div class="empty-message">
+                  Nothing marked watched yet.
+                </div>
+              `
+          }
+        </div>
+
       </section>
 
     </main>
   `
 
-  document.querySelectorAll('.rating-button').forEach(button => {
+  document.querySelectorAll('[data-action]').forEach(button => {
     button.addEventListener('click', () => {
-      setRating(
-        button.dataset.show,
-        button.dataset.person,
-        button.dataset.value
+      updateShow(
+        button.dataset.id,
+        button.dataset.action
       )
     })
   })
