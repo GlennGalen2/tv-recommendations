@@ -1,6 +1,7 @@
 import { deriveViewingAnalysis } from './viewingAnalysis.js'
 import { derivePrivatePreferenceAnalysis } from './privatePreferences.js'
 import { deriveRecommendations } from './recommendationEngine.js'
+import { validateLlmEvaluationBatch } from './llmEvaluationBatch.js'
 
 const DATABASE_NAME = 'tv-recommendations-private'
 const DATABASE_VERSION = 3
@@ -300,6 +301,28 @@ export async function listPrivateRecords(storeName, options = {}) {
   return records
 }
 
+// Small private settings belong in metadata rather than a new object store. They
+// are backed up with the rest of the private database but are never public data.
+export async function readPrivateMetadata(key) {
+  if (typeof key !== 'string' || !key.trim()) throw new TypeError('A metadata key is required.')
+  const database = await openPrivateStore()
+  const transaction = database.transaction(PRIVATE_STORES.metadata, 'readonly')
+  const record = await requestAsPromise(transaction.objectStore(PRIVATE_STORES.metadata).get(key))
+  await transactionAsPromise(transaction)
+  return record ?? null
+}
+
+export async function writePrivateMetadata(record) {
+  if (!record || typeof record !== 'object' || typeof record.key !== 'string' || !record.key.trim()) {
+    throw new TypeError('Private metadata requires a non-empty key.')
+  }
+  const database = await openPrivateStore()
+  const transaction = database.transaction(PRIVATE_STORES.metadata, 'readwrite')
+  transaction.objectStore(PRIVATE_STORES.metadata).put({ ...record, updatedAt: new Date().toISOString() })
+  await transactionAsPromise(transaction)
+  return record.key
+}
+
 export async function getPrivateViewingAnalysis() {
   const [events, titles, sources, resolutions] = await Promise.all([
     listPrivateRecords(PRIVATE_STORES.historyEvents),
@@ -423,6 +446,28 @@ export async function createCandidateEvidence(record, { database: providedDataba
   transaction.objectStore(PRIVATE_STORES.candidateEvidence).add(record)
   await transactionAsPromise(transaction)
   return record.id
+}
+
+export async function commitLlmEvaluationBatch(batch, { database: providedDatabase } = {}) {
+  validateLlmEvaluationBatch(batch)
+  const database = providedDatabase || await openPrivateStore()
+  const transaction = database.transaction(PRIVATE_STORES.recommendations, 'readwrite')
+  const store = transaction.objectStore(PRIVATE_STORES.recommendations)
+  const existing = await requestAsPromise(store.getAll())
+  if (existing.some(record => record.kind === 'llm-evaluation-batch' && record.llmEvaluationBatch?.id === batch.id)) {
+    await transactionAsPromise(transaction)
+    throw new Error('This private LLM evaluation batch has already been imported.')
+  }
+  const record = {
+    id: `llm-evaluation-batch:${batch.id}`,
+    schemaVersion: RECORD_SCHEMA_VERSION,
+    kind: 'llm-evaluation-batch',
+    importedAt: new Date().toISOString(),
+    llmEvaluationBatch: batch
+  }
+  store.add(record)
+  await transactionAsPromise(transaction)
+  return { id: record.id, imported: batch.evaluations.length }
 }
 
 function latestResolutionsByTitle(records) {

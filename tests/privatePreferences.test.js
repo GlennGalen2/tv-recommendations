@@ -74,4 +74,14 @@ assert.equal(preview.records.find(record => record.id === 'import-type').provena
 assert.equal(preview.records.find(record => record.id === 'import-correction').supersedesReactionId, 'import-title-id')
 assert.equal(preview.records.find(record => record.id === 'import-year').viewerId, 'viewer-2')
 
+const quickSharedPreview = previewExplicitPreferenceImport(JSON.stringify({ format: 'tv-recommendations-explicit-preferences', formatVersion: 1, records: [
+  { viewerId: 'viewer-1', title: 'Synthetic Science-Fiction Film', year: 2025, mediaType: 'movie', reaction: 'loved', strength: 1, mechanisms: { positive: ['intelligent-storytelling', 'speculative-worldbuilding', 'interesting-aliens', 'visual-imagination-effects'], negative: [] } },
+  { viewerId: 'viewer-2', title: 'Synthetic Science-Fiction Film', year: 2025, mediaType: 'movie', reaction: 'loved', strength: 1, mechanisms: { positive: ['intelligent-storytelling', 'speculative-worldbuilding', 'interesting-aliens', 'visual-imagination-effects'], negative: [] } }
+] }), { reactions, titles: syntheticTitles, resolutions: syntheticResolutions, viewerIds: new Set(['viewer-1', 'viewer-2']), fileName: 'private-quick-entry.json' })
+assert.equal(quickSharedPreview.summary.importable, 2)
+assert.equal(quickSharedPreview.summary.problems.length, 0)
+assert.equal(quickSharedPreview.titles.length, 1)
+assert.equal(quickSharedPreview.records[0].titleId, quickSharedPreview.records[1].titleId)
+assert.deepEqual(quickSharedPreview.records[0].mechanisms.positive, ['intelligent-storytelling', 'speculative-worldbuilding', 'interesting-aliens', 'visual-imagination-effects'])
+
 console.log('Private preference checks passed.')

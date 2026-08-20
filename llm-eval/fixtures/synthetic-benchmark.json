@@ -1,0 +1,14 @@
+{
+  "format": "tv-recommendations-llm-benchmark",
+  "formatVersion": 1,
+  "cases": [{
+    "id": "synthetic-investigation",
+    "title": "Synthetic Investigation",
+    "researchPacket": "synthetic-research-packet.json",
+    "expected": {
+      "viewer1Range": [70, 95], "viewer2Range": [65, 95], "jointRange": [65, 95],
+      "redFlags": [], "positiveMechanisms": ["grounded investigation"],
+      "notes": "Synthetic benchmark only."
+    }
+  }]
+}

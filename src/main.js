@@ -443,59 +443,48 @@ function render() {
         </div>
       </header>
 
-      <section class="section-heading">
-        <h2>Recommended for us</h2>
-        <p>Ranked by synthetic demo evidence.</p>
-      </section>
-
-      <section class="show-list">
-        ${shows.map(show => createCard(show, state)).join('')}
-      </section>
-
-      ${netflixImportPanel.render(privateDemoState.status === 'ready')}
-
-      ${amazonPrimeImportPanel.render(privateDemoState.status === 'ready')}
-
-      ${privateBackupPanel.render(privateDemoState.status === 'ready')}
-
-      ${viewingAnalysisPanel.render(privateDemoState.status === 'ready')}
-
-      ${importBatchMaintenancePanel.render(privateDemoState.status === 'ready')}
-
-      ${identityResolutionPanel.render(privateDemoState.status === 'ready')}
-
-      ${curatedAnchorResolutionPanel.render(privateDemoState.status === 'ready')}
-
-      ${preferencePanel.render(privateDemoState.status === 'ready')}
-
-      ${recommendationEnginePanel.render(privateDemoState.status === 'ready')}
-
       ${discoveredRecommendationsPanel.render(privateDemoState.status === 'ready')}
 
-      ${tmdbCredentialPanel.render(privateDemoState.status === 'ready')}
+      <details class="workbench-section">
+        <summary>Private data, imports, and backup</summary>
+        <p class="workbench-note">Use these when adding history or protecting your private local data.</p>
+        ${netflixImportPanel.render(privateDemoState.status === 'ready')}
+        ${amazonPrimeImportPanel.render(privateDemoState.status === 'ready')}
+        ${privateBackupPanel.render(privateDemoState.status === 'ready')}
+        ${viewingAnalysisPanel.render(privateDemoState.status === 'ready')}
+        ${importBatchMaintenancePanel.render(privateDemoState.status === 'ready')}
+      </details>
 
-      <section class="recent-section">
+      <details class="workbench-section">
+        <summary>Preferences, identity, and recommendation diagnostics</summary>
+        <p class="workbench-note">Advanced private review tools. They are kept out of the routine discovery path.</p>
+        ${identityResolutionPanel.render(privateDemoState.status === 'ready')}
+        ${curatedAnchorResolutionPanel.render(privateDemoState.status === 'ready')}
+        ${preferencePanel.render(privateDemoState.status === 'ready')}
+        ${recommendationEnginePanel.render(privateDemoState.status === 'ready')}
+        ${tmdbCredentialPanel.render(privateDemoState.status === 'ready')}
+      </details>
 
-        <div class="section-heading">
-          <h2>Recently watched</h2>
-          <p>Synthetic private history recorded for Viewer 1 in this browser.</p>
-        </div>
-
-        <div class="recent-list">
-          ${
-            recentlyWatched.length
-              ? recentlyWatched
-                  .map(show => createRecentItem(show))
-                  .join('')
-              : `
-                <div class="empty-message">
-                  Nothing marked watched yet.
-                </div>
-              `
-          }
-        </div>
-
-      </section>
+      <details class="workbench-section demo-workbench">
+        <summary>Public demo and developer test controls</summary>
+        <p class="workbench-note">Synthetic public-demo data only. It is not part of your private recommendation workflow.</p>
+        <section class="section-heading">
+          <h2>Public demo recommendations</h2>
+          <p>Ranked by synthetic demo evidence.</p>
+        </section>
+        <section class="show-list">
+          ${shows.map(show => createCard(show, state)).join('')}
+        </section>
+        <section class="recent-section">
+          <div class="section-heading">
+            <h2>Recently watched demo titles</h2>
+            <p>Synthetic private history recorded for Viewer 1 in this browser.</p>
+          </div>
+          <div class="recent-list">
+            ${recentlyWatched.length ? recentlyWatched.map(show => createRecentItem(show)).join('') : '<div class="empty-message">Nothing marked watched yet.</div>'}
+          </div>
+        </section>
+      </details>
 
     </main>
   `

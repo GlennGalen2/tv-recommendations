@@ -1,0 +1,13 @@
+{
+  "title": "Synthetic Investigation",
+  "year": 2025,
+  "mediaType": "tv",
+  "synopsis": "A synthetic investigator follows evidence through a fictional civic conspiracy.",
+  "criticalObservations": ["Synthetic reviewers describe a grounded, evolving mystery."],
+  "protagonistMoralSetup": "Synthetic protagonist protects witnesses and faces accountability.",
+  "violenceBrutalityNotes": "No synthetic torture or graphic gore is reported.",
+  "dialogueToneNotes": "Synthetic reviews describe restrained dialogue.",
+  "professionalRealismNotes": "Synthetic investigations follow plausible procedures.",
+  "storytellingMysteryNotes": "Synthetic clues evolve rather than reset.",
+  "sources": [{ "provider": "synthetic-fixture", "reference": "fixture-only" }]
+}

@@ -52,6 +52,49 @@ async function request(path, { getToken, fetchImpl }) {
   return response.json()
 }
 
+function queryPath(path, parameters) {
+  const query = new URLSearchParams(parameters)
+  return `${path}?${query.toString()}`
+}
+
+export async function fetchTmdbWatchProviders({ mediaType, region = 'US', getToken = getTmdbReadAccessToken, fetchImpl = globalThis.fetch }) {
+  const type = mediaType === 'movie' ? 'movie' : 'tv'
+  const payload = await request(queryPath(`/watch/providers/${type}`, { watch_region: region }), { getToken, fetchImpl })
+  return (Array.isArray(payload?.results) ? payload.results : [])
+    .filter(provider => Number.isInteger(provider?.provider_id) && typeof provider?.provider_name === 'string')
+    .map(provider => ({ id: String(provider.provider_id), name: provider.provider_name, logoPath: typeof provider.logo_path === 'string' ? provider.logo_path : null }))
+}
+
+export async function fetchTmdbProviderDiscovery({ mediaType, providerIds, region = 'US', page = 1, getToken = getTmdbReadAccessToken, fetchImpl = globalThis.fetch }) {
+  const type = mediaType === 'movie' ? 'movie' : 'tv'
+  const ids = [...new Set((providerIds || []).map(String).filter(Boolean))]
+  if (!ids.length) return []
+  const payload = await request(queryPath(`/discover/${type}`, {
+    language: 'en-US', page: String(Math.max(1, page)), watch_region: region,
+    with_watch_providers: ids.join('|'), with_watch_monetization_types: 'flatrate|free|ads', sort_by: 'popularity.desc'
+  }), { getToken, fetchImpl })
+  return (Array.isArray(payload?.results) ? payload.results : []).map(result => normalizeTmdbDiscoveryCandidate(result, type)).filter(Boolean)
+}
+
+const COHORT_FILTERS = new Set([
+  'sort_by', 'with_genres', 'without_genres', 'with_origin_country', 'with_original_language',
+  'vote_average.gte', 'vote_count.gte', 'vote_count.lte', 'first_air_date.gte', 'first_air_date.lte',
+  'primary_release_date.gte', 'primary_release_date.lte'
+])
+
+export async function fetchTmdbCohortDiscovery({ cohort, providerIds, region = 'US', page = 1, getToken = getTmdbReadAccessToken, fetchImpl = globalThis.fetch }) {
+  const type = cohort?.mediaType === 'movie' ? 'movie' : 'tv'
+  const ids = [...new Set((providerIds || []).map(String).filter(Boolean))]
+  if (!ids.length) return []
+  const filters = Object.fromEntries(Object.entries(cohort?.filters || {}).filter(([key, value]) => COHORT_FILTERS.has(key) && value !== null && value !== undefined && value !== ''))
+  const payload = await request(queryPath(`/discover/${type}`, {
+    language: 'en-US', page: String(Math.max(1, page)), include_adult: 'false',
+    watch_region: region, with_watch_providers: ids.join('|'),
+    with_watch_monetization_types: 'flatrate|free|ads', ...filters
+  }), { getToken, fetchImpl })
+  return (Array.isArray(payload?.results) ? payload.results : []).map(result => normalizeTmdbDiscoveryCandidate(result, type)).filter(Boolean)
+}
+
 export async function fetchTmdbWorkRecommendations({ seed, getToken = getTmdbReadAccessToken, fetchImpl = globalThis.fetch }) {
   const mediaType = seed.mediaType === 'movie' ? 'movie' : 'tv'
   const payload = await request(`/${mediaType}/${encodeURIComponent(seed.externalId)}/recommendations?language=en-US&page=1`, { getToken, fetchImpl })

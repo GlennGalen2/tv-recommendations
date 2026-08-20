@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { deriveRecommendations, jointScore, REACTION_WEIGHTS, scoreRecommendationCandidate } from '../src/data/recommendationEngine.js'
+import { deriveRecommendations, jointScore, learnMechanismWeights, REACTION_WEIGHTS, scoreRecommendationCandidate } from '../src/data/recommendationEngine.js'
 
 const titles = [
   { id: 'title:loved', title: 'Synthetic Loved Anchor', type: 'series', mechanisms: { positive: ['mystery-conspiracy'], negative: [] } },
@@ -46,5 +46,18 @@ assert.equal(scored.explicitAnchorExclusions['viewer-1'], 2)
 assert.equal(JSON.stringify(scored).includes('r-loved'), false)
 assert.equal(events.length, 2)
 assert.equal(reactions.length, 4)
+
+const sharedBaselineReactions = [
+  { id: 'shared-v1-positive', viewerId: 'viewer-1', titleId: 'shared-positive', reaction: 'loved', strength: 1, mechanisms: { positive: ['credible-professional-behavior'], negative: [] } },
+  { id: 'shared-v1-negative', viewerId: 'viewer-1', titleId: 'shared-negative', reaction: 'disliked', strength: 1, mechanisms: { positive: [], negative: ['criminal-protagonist'] } },
+  { id: 'specific-v2-override', viewerId: 'viewer-2', titleId: 'specific-v2', reaction: 'disliked', strength: 1, mechanisms: { positive: [], negative: ['credible-professional-behavior'] } }
+]
+const fallbackWeights = learnMechanismWeights(sharedBaselineReactions, 'viewer-2')
+assert.equal(fallbackWeights.get('criminal-protagonist') < 0, true)
+assert.equal(fallbackWeights.get('credible-professional-behavior') < 0, true)
+const sharedRiskCandidate = { id: 'shared-risk-candidate', title: 'Synthetic Shared Risk', type: 'series', externalIds: { tmdb: 'shared-risk' } }
+const sharedRiskEvidence = [{ id: 'shared-risk-evidence', target: { provider: 'tmdb', mediaType: 'tv', externalId: 'shared-risk' }, attributes: [{ attribute: 'criminal-protagonist-risk', direction: 'present', value: 1, confidence: 1, mechanisms: ['criminal-protagonist'], source: 'synthetic-human-curation', rationale: 'Synthetic shared moral-risk evidence.' }] }]
+const fallbackScore = scoreRecommendationCandidate({ title: sharedRiskCandidate, viewerId: 'viewer-2', otherViewerId: 'viewer-1', reactions: sharedBaselineReactions, candidateEvidence: sharedRiskEvidence })
+assert.equal(fallbackScore.score < 50, true)
 
 console.log('Recommendation engine checks passed.')

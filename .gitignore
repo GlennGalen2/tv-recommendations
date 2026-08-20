@@ -11,6 +11,10 @@ node_modules
 dist
 dist-ssr
 *.local
+llm-eval.config.local.json
+llm-eval.secrets.local.json
+llm-eval/*.local.*
+llm-eval/private/
 
 # Editor directories and files
 .vscode/*

@@ -191,6 +191,39 @@ button {
   margin-top: 46px;
 }
 
+.workbench-section {
+  margin-top: 46px;
+  padding: 18px;
+  border: 1px solid #374357;
+  border-radius: 12px;
+  background: rgba(25, 32, 44, 0.86);
+}
+
+.workbench-section > summary {
+  cursor: pointer;
+  color: #f5f6f8;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.workbench-section[open] > summary {
+  margin-bottom: 8px;
+}
+
+.workbench-note {
+  margin: 0;
+  color: #9faaba;
+  line-height: 1.45;
+}
+
+.workbench-section .import-section {
+  margin-top: 28px;
+}
+
+.demo-workbench .section-heading {
+  margin-top: 26px;
+}
+
 .import-panel {
   padding: 18px;
   border: 1px solid #374357;

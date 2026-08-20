@@ -1,18 +1,33 @@
 import {
   PRIVATE_STORES,
   commitExplicitPreferenceImport,
-  createReaction,
   getPrivatePreferenceAnalysis,
   getPrivateReactionAudit,
   listPrivateRecords,
-  removeConfirmedSyntheticDemoReaction,
-  supersedeReaction
+  removeConfirmedSyntheticDemoReaction
 } from '../data/privateStore.js'
 import { previewExplicitPreferenceImport } from '../data/privatePreferences.js'
 
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]) }
-function id() { return `rct_${crypto.randomUUID()}` }
 function list(value) { return String(value || '').split(',').map(item => item.trim()).filter(Boolean) }
+const COMMON_POSITIVE_MECHANISMS = Object.freeze([
+  ['intelligent-storytelling', 'Intelligent storytelling'],
+  ['speculative-worldbuilding', 'Speculative world-building'],
+  ['interesting-aliens', 'Interesting aliens'],
+  ['visual-imagination-effects', 'Visual imagination / special effects'],
+  ['evolving-information', 'Evolving information / discovery'],
+  ['mystery-conspiracy', 'Mystery / conspiracy'],
+  ['rootable-characters', 'Rootable characters'],
+  ['relationships', 'Relationships / character connection'],
+  ['natural-dialogue', 'Natural adult dialogue'],
+  ['credible-professional-behavior', 'Credible professional behavior'],
+  ['historical-drama', 'Historical drama'],
+  ['moral-complexity', 'Moral complexity'],
+  ['community-ensemble', 'Community / ensemble world'],
+  ['serious-grounded-tone', 'Serious, grounded tone']
+])
+function selected(selector) { return [...(document.querySelector(selector)?.selectedOptions || [])].map(option => option.value).filter(Boolean) }
+function mechanismOptions() { return COMMON_POSITIVE_MECHANISMS.map(([value, label]) => `<option value="${value}">${label}</option>`).join('') }
 
 export function createPreferencePanel({ requestRender, onPreferenceChanged = () => {} }) {
   let state = { status: 'loading', analysis: null, titles: [], viewers: [], reactions: [], resolutions: [], preview: null, audit: null, error: null, success: null }
@@ -29,32 +44,39 @@ export function createPreferencePanel({ requestRender, onPreferenceChanged = () 
     requestRender()
   }
 
-  function latestReaction(viewerId, titleId) {
-    const superseded = new Set(state.reactions.map(reaction => reaction.supersedesReactionId).filter(Boolean))
-    return state.reactions.find(reaction => reaction.viewerId === viewerId && reaction.titleId === titleId && !superseded.has(reaction.id)) || null
-  }
-
   async function saveManual() {
-    const viewerId = document.querySelector('#preference-viewer')?.value
+    const viewerSelection = document.querySelector('#preference-viewer')?.value
     const titleReference = document.querySelector('#preference-title')?.value?.trim()
-    const matches = state.titles.filter(title => title.id === titleReference || title.title === titleReference || title.originalTitle === titleReference)
-    const titleId = matches.length === 1 ? matches[0].id : null
     const reaction = document.querySelector('#preference-reaction')?.value
-    if (!viewerId || !titleId || !reaction) { state = { ...state, error: 'Enter one exact private title or title ID before saving.' }; requestRender(); return }
-    const previous = latestReaction(viewerId, titleId)
-    const record = {
-      id: id(), schemaVersion: 1, viewerId, titleId, reaction,
-      strength: Number(document.querySelector('#preference-strength')?.value || 1),
-      mechanisms: { positive: list(document.querySelector('#preference-positive')?.value), negative: list(document.querySelector('#preference-negative')?.value) },
-      note: document.querySelector('#preference-note')?.value?.trim() || null,
-      recordedAt: new Date().toISOString(), supersedesReactionId: previous?.id || null,
-      provenance: { sourceId: 'source:manual', sourceRecordId: 'private-preference-panel' }
+    const viewers = viewerSelection === 'both' ? state.viewers.map(viewer => viewer.id) : [viewerSelection]
+    const exactTitle = state.titles.find(title => title.id === titleReference)
+    const yearValue = document.querySelector('#preference-year')?.value
+    const year = yearValue ? Number(yearValue) : null
+    const mediaTypeValue = document.querySelector('#preference-media-type')?.value
+    const mechanisms = {
+      positive: [...new Set([...selected('#preference-positive-select'), ...list(document.querySelector('#preference-positive')?.value)])],
+      negative: [...new Set(list(document.querySelector('#preference-negative')?.value))]
+    }
+    if (!viewers.every(Boolean) || !titleReference || !reaction || (year !== null && !Number.isInteger(year))) { state = { ...state, error: 'Enter a title and, when supplied, a whole-number release year.' }; requestRender(); return }
+    const payload = {
+      format: 'tv-recommendations-explicit-preferences', formatVersion: 1,
+      records: viewers.map(viewerId => ({
+        viewerId, ...(exactTitle ? { titleId: exactTitle.id } : { title: titleReference }),
+        ...(year !== null ? { year } : {}), ...(mediaTypeValue ? { mediaType: mediaTypeValue } : {}),
+        reaction, strength: Number(document.querySelector('#preference-strength')?.value || 1), mechanisms,
+        note: document.querySelector('#preference-note')?.value?.trim() || null,
+        provenance: { sourceRecordId: 'private-quick-preference-panel' }
+      }))
     }
     try {
-      if (previous) await supersedeReaction(record)
-      else await createReaction(record)
+      const preview = previewExplicitPreferenceImport(JSON.stringify(payload), { reactions: state.reactions, titles: state.titles, resolutions: state.resolutions, viewerIds: new Set(state.viewers.map(viewer => viewer.id)) })
+      if (preview.summary.problems.length || (!preview.records.length && !preview.summary.duplicates)) {
+        state = { ...state, error: preview.summary.problems[0] || 'This title could not be resolved safely.' }; requestRender(); return
+      }
+      if (!preview.records.length) { state = { ...state, success: 'That reaction is already recorded for the selected viewer(s).', error: null }; requestRender(); return }
+      const result = await commitExplicitPreferenceImport({ reactions: preview.records, titles: preview.titles })
       await refresh(); await onPreferenceChanged()
-      state = { ...state, success: 'Explicit reaction saved privately.' }; requestRender()
+      state = { ...state, success: `Saved ${result.imported} private reaction(s)${result.importedTitles ? ` and ${result.importedTitles} new title reference(s)` : ''}.`, error: null }; requestRender()
     } catch { state = { ...state, error: 'The explicit reaction could not be saved.' }; requestRender() }
   }
 
@@ -109,7 +131,7 @@ export function createPreferencePanel({ requestRender, onPreferenceChanged = () 
       <button class="action-button" id="refresh-preferences" ${storeReady && state.status !== 'loading' ? '' : 'disabled'}>Refresh preference summary</button>
       ${state.status === 'loading' ? '<p>Analyzing private preferences locally…</p>' : ''}${state.error ? `<p class="import-error">${escapeHtml(state.error)}</p>` : ''}${state.success ? `<p class="import-success">${escapeHtml(state.success)}</p>` : ''}
       ${analysis ? `<div class="analysis-grid">${viewerCounts}<p><strong>${analysis.behavioral.filter(item => item.direction === 'positive').length}</strong> behavioral positive signals</p><p><strong>${analysis.behavioral.filter(item => item.direction === 'negative').length}</strong> possible early abandonments</p><p><strong>${analysis.behavioral.filter(item => item.signal === 'repeat_viewing').length}</strong> repeat-viewing signals</p><p><strong>${analysis.availabilityUncertain.length}</strong> availability-uncertain cases</p><p><strong>${analysis.conflicts.length}</strong> explicit/inferred conflicts (explicit wins)</p><p><strong>${analysis.differences.length}</strong> Viewer 1/Viewer 2 differences</p></div><p>Strongest explicit positive anchors: ${anchors(analysis.explicit.filter(record => ['loved', 'liked'].includes(record.reaction)).sort((left, right) => (right.strength || 1) - (left.strength || 1)), 'none yet')}.</p><p>Strongest explicit negative anchors: ${anchors(analysis.explicit.filter(record => ['disliked', 'abandoned'].includes(record.reaction)).sort((left, right) => (right.strength || 1) - (left.strength || 1)), 'none yet')}.</p><p>High-confidence behavioral positive anchors: ${anchors(analysis.behavioral.filter(record => record.direction === 'positive' && record.confidence >= 0.7).sort((left, right) => right.strength - left.strength), 'none yet')}.</p><p>Common positive mechanisms: ${mechanismSummary('positive')}.</p><p>Common negative mechanisms: ${mechanismSummary('negative')}.</p>` : ''}
-      <div class="import-preview"><h3>Add or correct an explicit reaction</h3><label>Viewer <select id="preference-viewer">${state.viewers.map(viewer => `<option value="${escapeHtml(viewer.id)}">${escapeHtml(viewer.displayName || viewer.id)}</option>`).join('')}</select></label><label>Title or private title ID <input id="preference-title" placeholder="Enter an exact title or title ID" /></label><label>Reaction <select id="preference-reaction">${['loved','liked','okay','disliked','abandoned','unknown'].map(reaction => `<option value="${reaction}">${reaction}</option>`).join('')}</select></label><label>Strength <input id="preference-strength" type="number" min="0" max="1" step="0.1" value="1" /></label><label>Positive mechanisms (comma-separated) <input id="preference-positive" /></label><label>Negative mechanisms (comma-separated) <input id="preference-negative" /></label><label>Concise note <input id="preference-note" maxlength="500" /></label><button class="action-button" id="save-preference" ${storeReady ? '' : 'disabled'}>Save explicit reaction</button></div>
+      <div class="import-preview"><h3>Quick preference</h3><p>Enter a remembered title even when it is absent from viewing history. This stays private and creates a stable curated title reference when needed.</p><label>Who <select id="preference-viewer"><option value="both">Both viewers</option>${state.viewers.map(viewer => `<option value="${escapeHtml(viewer.id)}">${escapeHtml(viewer.displayName || viewer.id)}</option>`).join('')}</select></label><label>Title <input id="preference-title" placeholder="Movie or series title" /></label><label>Release year (optional) <input id="preference-year" type="number" min="1880" max="2100" /></label><label>Type <select id="preference-media-type"><option value="">Not sure</option><option value="movie">Movie</option><option value="tv">TV series</option></select></label><label>Reaction <select id="preference-reaction">${['loved','liked','okay','disliked','abandoned','unknown'].map(reaction => `<option value="${reaction}">${reaction}</option>`).join('')}</select></label><label>Strength <input id="preference-strength" type="number" min="0" max="1" step="0.1" value="1" /></label><label>Why it worked (choose any) <select id="preference-positive-select" multiple size="8">${mechanismOptions()}</select></label><p class="form-hint">Use Ctrl-click on Windows to select more than one reason.</p><label>Additional positive reasons (comma-separated) <input id="preference-positive" /></label><label>Negative reservations (comma-separated) <input id="preference-negative" /></label><label>Concise note <input id="preference-note" maxlength="500" /></label><button class="action-button" id="save-preference" ${storeReady ? '' : 'disabled'}>Save private preference</button></div>
       <div class="import-preview"><h3>Import curated explicit preferences</h3><p>JSON is parsed locally, previewed, and saved only after confirmation. Records may use a private <code>titleId</code> or a human-readable <code>title</code> with optional <code>year</code>, <code>mediaType</code>, and <code>tmdbId</code>. Raw file contents are never stored.</p><input id="preference-import-file" type="file" accept="application/json,.json" ${storeReady ? '' : 'disabled'} />${state.preview ? `<p>${state.preview.summary.sourceRecords} source records; ${state.preview.summary.importable} safe to import; ${state.preview.summary.curatedTitles} new private curated references; ${state.preview.summary.duplicates} duplicates skipped.</p>${state.preview.previewRecords.slice(0, 20).map(record => `<p>${escapeHtml(record.suppliedTitle || 'private title ID')}: <strong>${escapeHtml(record.status)}</strong>${record.resolvedIdentity?.title ? ` → ${escapeHtml(record.resolvedIdentity.title)}` : ''} · ${escapeHtml(record.reaction)}</p>`).join('')}${state.preview.summary.problems.length ? `<p class="import-error">${escapeHtml(state.preview.summary.problems.join(' '))}</p>` : ''}<button class="action-button" id="confirm-preference-import" ${state.preview.records.length ? '' : 'disabled'}>Import explicit preferences</button>` : ''}</div>
       <div class="import-preview"><h3>Private preference maintenance</h3><p>Inspect an exact title's append-only reaction history locally.</p><label>Exact title <input id="preference-audit-title" value="${escapeHtml(audit?.title || '')}" /></label><button class="action-button" id="inspect-preference-audit" ${storeReady ? '' : 'disabled'}>Inspect reaction history</button>${audit ? (audit.records.length ? audit.records.map(record => `<p><strong>${escapeHtml(record.viewer)}</strong>: ${escapeHtml(record.reaction)} · ${record.current ? 'current' : 'superseded'} · ${escapeHtml(record.provenance?.sourceRecordId || 'no source record')}</p>`).join('') : '<p>No matching private reactions.</p>') : ''}${differences.length ? `<p>Current Viewer 1 / Viewer 2 difference: ${differences.map(difference => `${escapeHtml(difference.title)} (${escapeHtml(difference.reactions)})`).join('; ')}</p>` : ''}${syntheticDemoReaction ? '<p>A confirmed synthetic private-demo reaction is present.</p><button class="action-button" id="remove-synthetic-demo-reaction">Remove confirmed synthetic demo reaction</button>' : ''}</div>
     </div></section>`

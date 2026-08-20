@@ -24,7 +24,19 @@
     "test:tmdb-discovery": "node tests/tmdbDiscovery.test.js",
     "test:candidate-enrichment": "node tests/candidateEnrichment.test.js",
     "test:private-preferences": "node tests/privatePreferences.test.js",
-    "test:recommendation-engine": "node tests/recommendationEngine.test.js"
+    "test:recommendation-engine": "node tests/recommendationEngine.test.js",
+    "test:llm-evaluator": "node tests/llmEvaluator.test.js",
+    "test:llm-holdouts": "node tests/llmHoldouts.test.js",
+    "test:llm-candidate-batch": "node tests/llmCandidateBatch.test.js",
+    "test:llm-research": "node tests/llmResearch.test.js",
+    "test:llm-research-queue": "node tests/llmResearchQueue.test.js",
+    "llm:eval": "node llm-eval/cli.js eval",
+    "llm:evaluate-candidates": "node llm-eval/cli.js evaluate-candidates",
+    "llm:research-one": "node llm-eval/cli.js research-one",
+    "llm:evaluate-one": "node llm-eval/cli.js evaluate-one",
+    "llm:queue-create": "node llm-eval/cli.js queue-create",
+    "llm:queue-run": "node llm-eval/cli.js queue-run",
+    "llm:compare": "node llm-eval/cli.js compare"
   },
   "devDependencies": {
     "vite": "^8.2.0",

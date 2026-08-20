@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "targets": [
+    {
+      "benchmarkCaseId": "synthetic-case-id",
+      "excludeProfileBlockIds": ["synthetic-anchor-block"]
+    }
+  ]
+}
