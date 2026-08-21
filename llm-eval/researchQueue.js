@@ -96,13 +96,13 @@ export async function runPrivateResearchQueue({ queue, researchAdapter, evaluati
         const research = await researchCandidate({ adapter: researchAdapter, target: item.target })
         packet = research.packet
         item.researchPacketPath = await saveResearchPacket({ packet, item })
-        item.researchMetrics = { latencyMs: research.latencyMs, usage: research.usage, costUsd: research.costUsd }
+        item.researchMetrics = { model: researchAdapter.model || null, latencyMs: research.latencyMs, usage: research.usage, costUsd: research.costUsd }
         item.status = 'research-complete'
         item.error = null
         await persistQueue(queue)
       }
       const evaluation = await evaluateCandidate({ adapter: evaluationAdapter, viewerProfile, researchPacket: packet })
-      item.evaluation = { evaluation: evaluation.evaluation, latencyMs: evaluation.latencyMs, usage: evaluation.usage, completedAt: now() }
+      item.evaluation = { model: evaluationAdapter.model || null, evaluation: evaluation.evaluation, latencyMs: evaluation.latencyMs, usage: evaluation.usage, completedAt: now() }
       item.status = 'completed'
       item.error = null
     } catch (error) {

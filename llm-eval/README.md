@@ -41,7 +41,7 @@ The results directory is ignored by Git. Result reports are written by a tempora
 
 ## Private discovered-candidate evaluations
 
-The PWA can download up to 15 joint-eligible TMDb discovery candidates as a private JSON batch. This is a deliberate, user-directed export: it does not send anything to OpenAI and it does not contain browser credentials. Save it somewhere under the ignored `llm-eval/private/` directory.
+The PWA can download up to 50 joint-eligible TMDb discovery candidates as a private JSON batch. This is a deliberate, user-directed export: it does not send anything to OpenAI and it does not contain browser credentials. Save it somewhere under the ignored `llm-eval/private/` directory.
 
 For every exported candidate, create a private research packet using the existing evaluator input contract. Name each packet `<mediaType>-<tmdbId>.json` (for example, `tv-12345.json`) in an ignored private research directory. Then run the local Node evaluator:
 
@@ -73,7 +73,21 @@ For a Windows-local batch, first create an ignored queue from a private candidat
 
 ```powershell
 npm run llm:queue-create -- --candidates .\llm-eval\private\candidates\candidate-batch.json --queue .\llm-eval\private\queues\weekly.json --max-cost-cents 100 --reserved-cost-cents 3
-npm run llm:queue-run -- --provider openai --model <model> --profile .\llm-eval\private\viewer-preferences.md --queue .\llm-eval\private\queues\weekly.json --research-dir .\llm-eval\private\candidate-research --limit 10
+npm run llm:queue-run -- --provider openai --research-model gpt-5.4-nano --evaluation-model gpt-5.4-mini --profile .\llm-eval\private\viewer-preferences.md --queue .\llm-eval\private\queues\weekly.json --research-dir .\llm-eval\private\candidate-research --limit 10
 ```
 
 Retry failed work deliberately with `--retry-failed true`. The queue, dossiers, and evaluations stay under ignored `llm-eval/private/`; it does not write to IndexedDB or the public PWA.
+
+`--model <model>` remains supported for existing one-model queues. When supplied, it is used for both research and evaluation unless either explicit model flag overrides it.
+
+## Windows-local recommendation runner (v1)
+
+The normal app workflow uses a local-only companion service, so no Codex supervision is needed for a recommendation run. Start it in a PowerShell window in the repository root:
+
+```powershell
+npm run recommendation-runner
+```
+
+It listens only on `127.0.0.1:5119`. The PWA can send it a selected batch of public TMDb title data. The runner reads the private profile and `OPENAI_API_KEY` only from ignored local files, uses Nano for web research and Mini for scoring, and writes queues/results only under ignored `llm-eval/private/`. The browser never receives the key.
+
+With the runner open, use **Get more** in the app to start a capped batch. The app displays completed recommendations directly from the local runner; they are kept separate from the public demo data and do not automatically become preference evidence.

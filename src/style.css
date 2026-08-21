@@ -187,6 +187,151 @@ button {
   margin-top: 46px;
 }
 
+.recommendation-home {
+  margin-bottom: 42px;
+}
+
+.home-intro {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.home-intro h2 {
+  margin: 4px 0 8px;
+  font-size: clamp(1.75rem, 4vw, 2.4rem);
+}
+
+.home-intro p:not(.eyebrow) {
+  margin: 0;
+  color: #aab4c3;
+  max-width: 630px;
+  line-height: 1.5;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #93bfe8;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.runner-status {
+  margin: 0;
+  max-width: 300px;
+  padding: 10px 12px;
+  border: 1px solid #86554c;
+  border-radius: 10px;
+  color: #ffd2c9;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.runner-status.connected {
+  border-color: #3f7e63;
+  color: #bde8ce;
+}
+
+.run-progress {
+  margin: -6px 0 18px;
+  padding: 11px 13px;
+  border-left: 3px solid #7dd3fc;
+  border-radius: 6px;
+  background: rgba(31, 75, 104, 0.35);
+  color: #d7efff;
+}
+
+.recommendation-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid #374357;
+}
+
+.tab-button {
+  border: 0;
+  border-bottom: 3px solid transparent;
+  padding: 11px 13px;
+  background: transparent;
+  color: #bac5d3;
+  cursor: pointer;
+}
+
+.tab-button:hover,
+.tab-button.active {
+  color: #fff;
+  border-bottom-color: #7dd3fc;
+}
+
+.recommendation-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.recommendation-card,
+.get-more-panel {
+  padding: 20px;
+  border: 1px solid #394559;
+  border-radius: 16px;
+  background: rgba(29, 37, 50, 0.97);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.18);
+}
+
+.recommendation-card__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.recommendation-card h3,
+.get-more-panel h3 {
+  margin: 5px 0 0;
+  font-size: 1.35rem;
+}
+
+.recommendation-rationale {
+  min-height: 4.2em;
+  margin: 18px 0 12px;
+  color: #d9dee6;
+  line-height: 1.45;
+}
+
+.recommendation-meta,
+.quiet-note {
+  margin: 0 0 16px;
+  color: #aab4c3;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.get-more-panel {
+  max-width: 700px;
+}
+
+.get-more-panel > p:not(.quiet-note) {
+  color: #d9dee6;
+  line-height: 1.55;
+}
+
+.primary-action {
+  margin: 6px 0 12px;
+  background: #176c96;
+  border-color: #64c5f1;
+}
+
+.primary-action:hover:not(:disabled) {
+  background: #2286b8;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .import-section {
   margin-top: 46px;
 }
@@ -246,7 +391,21 @@ button {
   display: block;
   width: 100%;
   margin-top: 7px;
-  color: #e8ebef;
+  border: 1px solid #64748b;
+  border-radius: 6px;
+  background: #172131;
+  color: #f8fafc;
+}
+
+.import-panel select option {
+  background: #172131;
+  color: #f8fafc;
+}
+
+.import-panel select:focus,
+.import-panel input:focus {
+  outline: 2px solid #7dd3fc;
+  outline-offset: 2px;
 }
 
 .import-preview {
@@ -357,6 +516,15 @@ button {
 
   .app-header {
     display: block;
+  }
+
+  .home-intro {
+    display: block;
+  }
+
+  .runner-status {
+    max-width: none;
+    margin-top: 16px;
   }
 
   .app-badge {

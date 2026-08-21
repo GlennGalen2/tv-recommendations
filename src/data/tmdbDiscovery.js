@@ -5,7 +5,7 @@ import { normalizeAmazonLookupTitle } from './amazonLookupTitle.js'
 import { normalizeNetflixLookupTitle } from './netflixLookupTitle.js'
 
 export const DISCOVERY_SEED_LIMIT = 12
-export const DISCOVERY_CANDIDATE_LIMIT = 40
+export const DISCOVERY_CANDIDATE_LIMIT = 50
 export const DISCOVERY_DETAIL_LIMIT = 25
 export const PRIVATE_DISCOVERY_AVAILABILITY_KEY = 'discoveryAvailabilityPreferences'
 export const QUALITY_COHORT_CANDIDATE_LIMIT = 120
@@ -329,6 +329,7 @@ export async function runTmdbQualityCohortDiscovery(records, preferences, {
   cohorts = QUALITY_DISCOVERY_COHORTS,
   fetchProviders = fetchTmdbWatchProviders,
   fetchCohortDiscovery = fetchTmdbCohortDiscovery,
+  pageNumbers = null,
   ...options
 } = {}) {
   const resolved = await resolveTmdbPreferredServices(preferences, { fetchProviders })
@@ -338,9 +339,15 @@ export async function runTmdbQualityCohortDiscovery(records, preferences, {
     { id: 'priority', name: 'Priority curated services', providers: resolved.selectedPriorityProviders, perCohortLimit: 15 },
     ...(explorationProviders.length ? [{ id: 'exploration', name: 'Broader-service exploration', providers: explorationProviders, perCohortLimit: 5 }] : [])
   ] : [{ id: 'all', name: 'All preferred services', providers: resolved.selectedProviders, perCohortLimit: 20 }]
+  const requestedPages = Array.isArray(pageNumbers)
+    ? [...new Set(pageNumbers.filter(page => Number.isInteger(page) && page >= 1))]
+    : null
+  const pagesFor = cohort => requestedPages?.length
+    ? requestedPages
+    : cohort.band === 'lower-exposure' ? [1, 2] : [1]
   const searchItems = providerGroups.flatMap(group => cohorts
     .filter(cohort => group.providers.some(provider => provider.mediaType === cohort.mediaType))
-    .flatMap(cohort => (cohort.band === 'lower-exposure' ? [1, 2] : [1]).map(page => ({ cohort, group, page, providerIds: group.providers.filter(provider => provider.mediaType === cohort.mediaType).map(provider => provider.id) }))))
+    .flatMap(cohort => pagesFor(cohort).map(page => ({ cohort, group, page, providerIds: group.providers.filter(provider => provider.mediaType === cohort.mediaType).map(provider => provider.id) }))))
   const cohortRun = await bounded(searchItems, 2, async item => ({
     source: {
       kind: 'tmdb-quality-cohort', cohortId: item.cohort.id, cohortName: item.cohort.name,

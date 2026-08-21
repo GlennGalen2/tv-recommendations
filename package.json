@@ -36,7 +36,8 @@
     "llm:evaluate-one": "node llm-eval/cli.js evaluate-one",
     "llm:queue-create": "node llm-eval/cli.js queue-create",
     "llm:queue-run": "node llm-eval/cli.js queue-run",
-    "llm:compare": "node llm-eval/cli.js compare"
+    "llm:compare": "node llm-eval/cli.js compare",
+    "recommendation-runner": "node llm-eval/localRunnerServer.js"
   },
   "devDependencies": {
     "vite": "^8.2.0",

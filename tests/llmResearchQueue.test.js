@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { createPrivateResearchQueue, privateQueueSummary, runPrivateResearchQueue } from '../llm-eval/researchQueue.js'
+import { writePrivateResearchQueue } from '../llm-eval/researchQueueStore.js'
 
 const candidates = {
   format: 'tv-recommendations-llm-candidate-batch', formatVersion: 1, id: 'synthetic-batch', createdAt: '2026-01-01T00:00:00.000Z',
@@ -20,8 +21,8 @@ const packets = new Map()
 const persisted = []
 const result = await runPrivateResearchQueue({
   queue,
-  researchAdapter: { research: async () => { researchCalls += 1; return { text: JSON.stringify(packetFor(queue.items[0].target)), usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 }, costUsd: 0.001 } } },
-  evaluationAdapter: { evaluate: async () => { evaluationCalls += 1; if (failEvaluation) throw Object.assign(new Error('Synthetic provider failure.'), { type: 'provider_request_failed' }); return { text: JSON.stringify(evaluation) } } },
+  researchAdapter: { model: 'synthetic-research', research: async () => { researchCalls += 1; return { text: JSON.stringify(packetFor(queue.items[0].target)), usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 }, costUsd: 0.001 } } },
+  evaluationAdapter: { model: 'synthetic-evaluation', evaluate: async () => { evaluationCalls += 1; if (failEvaluation) throw Object.assign(new Error('Synthetic provider failure.'), { type: 'provider_request_failed' }); return { text: JSON.stringify(evaluation) } } },
   viewerProfile: '# Synthetic profile',
   loadResearchPacket: async path => packets.get(path) || null,
   saveResearchPacket: async ({ packet, item }) => { const path = `private/${item.id}.json`; packets.set(path, packet); return path },
@@ -35,6 +36,7 @@ assert.equal(result.summary.pending, 1)
 assert.equal(result.summary.reservedCostCents, 3)
 assert.equal(queue.items[0].researchMetrics.usage.totalTokens, 20)
 assert.equal(queue.items[0].researchMetrics.costUsd, 0.001)
+assert.equal(queue.items[0].researchMetrics.model, 'synthetic-research')
 assert.ok(persisted.length >= 2)
 
 failEvaluation = false
@@ -52,6 +54,7 @@ const retry = await runPrivateResearchQueue({
 assert.equal(retry.summary.completed, 1)
 assert.equal(retry.summary.pending, 1)
 assert.equal(privateQueueSummary(queue).reservedCostCents, 3)
+assert.equal(queue.items[0].evaluation.model, null)
 
 const failedResearchQueue = createPrivateResearchQueue({ candidateBatch: { ...candidates, candidates: [candidates.candidates[0]] }, id: 'failed-research-queue', maxCostCents: 3, reservedCostCentsPerCandidate: 3, createdAt: '2026-01-01T00:00:00.000Z' })
 const failedResearch = await runPrivateResearchQueue({
@@ -65,4 +68,24 @@ const failedResearch = await runPrivateResearchQueue({
 })
 assert.equal(failedResearch.summary.failed, 1)
 assert.equal(failedResearch.summary.reservedCostCents, 3)
+let renameAttempts = 0
+let delays = 0
+await writePrivateResearchQueue({
+  queue,
+  path: 'C:/synthetic-private/queues/retry.json',
+  privateRoot: 'C:/synthetic-private',
+  mkdirImpl: async () => {},
+  writeFileImpl: async () => {},
+  renameImpl: async () => {
+    renameAttempts += 1
+    if (renameAttempts === 1) {
+      const error = new Error('Synthetic Windows file lock.')
+      error.code = 'EPERM'
+      throw error
+    }
+  },
+  delay: async () => { delays += 1 }
+})
+assert.equal(renameAttempts, 2)
+assert.equal(delays, 1)
 console.log('LLM private research queue checks passed.')

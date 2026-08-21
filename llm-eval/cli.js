@@ -74,8 +74,10 @@ async function runQueue(config) {
   const profile = await readFile(config.profile, 'utf8')
   const researchDirectory = resolve(config.researchDirectory || 'llm-eval/private/candidate-research')
   const apiKey = await loadLocalCredential({ name: config.apiKeyEnv })
-  const researchAdapter = createOpenAiWebResearchAdapter({ model: config.model, apiKey, endpoint: config.endpoint })
-  const evaluationAdapter = await adapterFrom(config)
+  const researchModel = config.researchModel || config.model
+  const evaluationModel = config.evaluationModel || config.model
+  const researchAdapter = createOpenAiWebResearchAdapter({ model: researchModel, apiKey, endpoint: config.endpoint })
+  const evaluationAdapter = await adapterFrom({ ...config, model: evaluationModel })
   const result = await runPrivateResearchQueue({
     queue, researchAdapter, evaluationAdapter, viewerProfile: profile,
     loadResearchPacket: async path => { try { return await json(path) } catch { return null } },
@@ -83,7 +85,7 @@ async function runQueue(config) {
     persistQueue: async value => { await writePrivateResearchQueue({ queue: value, path: config.queue }) },
     retryFailed: config.retryFailed, limit: Number(config.limit || Infinity)
   })
-  console.log(JSON.stringify({ queueId: result.queue.id, processed: result.processed, ...result.summary }, null, 2))
+  console.log(JSON.stringify({ queueId: result.queue.id, researchModel, evaluationModel, processed: result.processed, ...result.summary }, null, 2))
 }
 const [command, ...rest] = process.argv.slice(2); const options = args(rest)
 if (command === 'eval') await run({ provider: options.provider, model: options.model, apiKeyEnv: options['api-key-env'] || 'OPENAI_API_KEY', endpoint: options.endpoint, baseUrl: options['base-url'], profile: options.profile || 'llm-eval/templates/viewer-preferences.template.md', benchmark: options.benchmark, repeats: options.repeats, holdoutManifest: options['holdout-manifest'], holdoutCase: options['holdout-case'], resultsDirectory: options['results-dir'] })
@@ -92,5 +94,5 @@ else if (command === 'evaluate-candidates') await runCandidateBatch({ provider: 
 else if (command === 'research-one') await runResearchOne({ model: options.model, apiKeyEnv: options['api-key-env'] || 'OPENAI_API_KEY', endpoint: options.endpoint, title: options.title, mediaType: options['media-type'], year: options.year, outputDirectory: options['output-dir'], outputName: options['output-name'] })
 else if (command === 'evaluate-one') await runEvaluationOne({ provider: options.provider, model: options.model, apiKeyEnv: options['api-key-env'] || 'OPENAI_API_KEY', endpoint: options.endpoint, baseUrl: options['base-url'], profile: options.profile, research: options.research })
 else if (command === 'queue-create') await createQueue({ candidates: options.candidates, queue: options.queue, maxCostCents: options['max-cost-cents'], reservedCostCents: options['reserved-cost-cents'] })
-else if (command === 'queue-run') await runQueue({ provider: options.provider, model: options.model, apiKeyEnv: options['api-key-env'] || 'OPENAI_API_KEY', endpoint: options.endpoint, baseUrl: options['base-url'], profile: options.profile, queue: options.queue, researchDirectory: options['research-dir'], retryFailed: options['retry-failed'] === 'true', limit: options.limit })
+else if (command === 'queue-run') await runQueue({ provider: options.provider, model: options.model, researchModel: options['research-model'], evaluationModel: options['evaluation-model'], apiKeyEnv: options['api-key-env'] || 'OPENAI_API_KEY', endpoint: options.endpoint, baseUrl: options['base-url'], profile: options.profile, queue: options.queue, researchDirectory: options['research-dir'], retryFailed: options['retry-failed'] === 'true', limit: options.limit })
 else throw new Error('Usage: npm run llm:eval -- --provider openai --model <model> --benchmark <file>')

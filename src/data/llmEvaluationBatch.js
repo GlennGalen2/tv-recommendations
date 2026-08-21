@@ -92,7 +92,7 @@ export function unevaluatedLlmCandidates(candidates, evaluationRecords = []) {
   return candidates.filter(candidate => !evaluated.has(`tmdb:${candidate.mediaType}:${candidate.externalId}`))
 }
 
-export function createLlmCandidateBatch(candidates, { id, createdAt = new Date().toISOString(), limit = 15, evaluationRecords = [] } = {}) {
+export function createLlmCandidateBatch(candidates, { id, createdAt = new Date().toISOString(), limit = 50, evaluationRecords = [] } = {}) {
   if (!Array.isArray(candidates)) throw new TypeError('LLM candidate export requires candidates.')
   const selected = balancedCandidateSelection(unevaluatedLlmCandidates(candidates, evaluationRecords), limit).map(stableCandidate)
   const batch = {
@@ -110,7 +110,7 @@ export function validateLlmCandidateBatch(batch) {
   if (batch.format !== LLM_CANDIDATE_BATCH_FORMAT || batch.formatVersion !== LLM_BATCH_FORMAT_VERSION) throw new TypeError('Unsupported LLM candidate batch format.')
   requireText(batch.id, 'LLM candidate batch requires an ID.')
   if (typeof batch.createdAt !== 'string' || Number.isNaN(Date.parse(batch.createdAt))) throw new TypeError('LLM candidate batch requires a valid creation timestamp.')
-  if (!Array.isArray(batch.candidates) || !batch.candidates.length || batch.candidates.length > 20) throw new TypeError('LLM candidate batches require 1 through 20 candidates.')
+  if (!Array.isArray(batch.candidates) || !batch.candidates.length || batch.candidates.length > 50) throw new TypeError('LLM candidate batches require 1 through 50 candidates.')
   const keys = new Set()
   for (const candidate of batch.candidates) {
     requireObject(candidate, 'Each LLM candidate must be an object.')
@@ -142,7 +142,7 @@ export function validateLlmEvaluationBatch(batch) {
   if (typeof batch.generatedAt !== 'string' || Number.isNaN(Date.parse(batch.generatedAt))) throw new TypeError('LLM evaluation batch requires a valid generatedAt timestamp.')
   requireObject(batch.sourceCandidateBatch, 'LLM evaluation batch requires source candidate provenance.')
   requireText(batch.sourceCandidateBatch.id, 'LLM evaluation batch requires its source candidate batch ID.')
-  if (!Array.isArray(batch.evaluations) || !batch.evaluations.length || batch.evaluations.length > 20) throw new TypeError('LLM evaluation batches require 1 through 20 evaluations.')
+  if (!Array.isArray(batch.evaluations) || !batch.evaluations.length || batch.evaluations.length > 50) throw new TypeError('LLM evaluation batches require 1 through 50 evaluations.')
   for (const entry of batch.evaluations) {
     requireObject(entry, 'Each LLM evaluation entry must be an object.')
     requireTarget(entry.target)

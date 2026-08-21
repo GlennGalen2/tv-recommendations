@@ -30,6 +30,13 @@ The desired workflow is:
 The architecture should remain simple enough for one owner to operate
 but rigorous enough that future agents can extend it safely.
 
+## Product milestone
+
+As of August 21, 2026, the owners designate the application **v0.8 beta**.
+It has demonstrated the full private recommendation workflow in real use,
+including a successful 50-title local research and scoring run. The next
+incremental development line is v0.8.1.
+
 ------------------------------------------------------------------------
 
 ## Who Makes Which Decisions
@@ -556,6 +563,44 @@ After the viewers watch something:
 
 Do not automatically change the system after every single surprise. Look
 for repeated failure modes.
+
+------------------------------------------------------------------------
+
+## Viewing-History Operational Priority
+
+The Netflix and Amazon viewing-history CSV exports are foundational
+private training data. They are not disposable setup artifacts and must
+not be replaced by manually entering thousands of titles.
+
+Before doing further LLM recommendation work, verify that the intended
+history is present in the active browser-local app instance. When a
+history import is absent, restore it from the original exports using the
+following sequence:
+
+1. import each service export for the correct viewer through its local
+   preview-and-confirm workflow;
+2. verify import counts, deduplication, and date ranges in the preview;
+3. run TMDb identity resolution in bounded, reviewable batches;
+4. preserve ambiguous matches for review rather than guessing;
+5. derive behavioral signals from the resulting playback ledger;
+6. use watched/rated identity to exclude already-known titles from new
+   recommendations;
+7. use completed available series as strong positive behavioral
+   evidence, while keeping it distinct from an explicit human rating.
+
+The app deliberately stores parsed local title/event records and source
+hashes, not raw CSV contents. Owners should retain the original exports
+or a private backup independently. Browser-local private storage is
+scoped to its exact origin (including local-development port), so a
+different local address does not automatically contain an earlier
+instance's history or credentials.
+
+The authoritative check is the **Private Viewing History Analysis** and
+**Imported data maintenance** panels, not a shallow startup summary.
+Before evaluating a new batch with an LLM, verify that the intended
+Netflix/Amazon history is present in the active origin. The LLM should
+receive a compact private preference profile and researched candidate
+evidence, not the raw complete history on each evaluation.
 
 ------------------------------------------------------------------------
 

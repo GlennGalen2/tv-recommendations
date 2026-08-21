@@ -177,6 +177,14 @@ await runTmdbQualityCohortDiscovery(cohortRecords, { region: 'US', serviceNames:
   fetchRecommendations: async () => [], fetchDetails: async candidate => candidate
 })
 assert.deepEqual(longTailPages, [1, 2])
+const requestedCohortPages = []
+await runTmdbQualityCohortDiscovery(cohortRecords, { region: 'US', serviceNames: ['Synthetic Plus'] }, {
+  cohorts: [LONG_TAIL_DISCOVERY_COHORTS[0]], pageNumbers: [3, 4, 4],
+  fetchProviders: async () => [{ id: 7, name: 'Synthetic Plus', mediaType: 'tv' }],
+  fetchCohortDiscovery: async input => { requestedCohortPages.push(input.page); return [] },
+  fetchRecommendations: async () => [], fetchDetails: async candidate => candidate
+})
+assert.deepEqual(requestedCohortPages, [3, 4])
 assert.equal(discoveryResearchPriority({ voteAverage: 9.5, voteCount: 20, discoverySources: [] }).value < discoveryResearchPriority({ voteAverage: 8.2, voteCount: 2000, discoverySources: [] }).value, true)
 assert.deepEqual(cohortRecords, records)
 

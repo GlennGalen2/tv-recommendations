@@ -22,6 +22,7 @@ import { createPreferencePanel } from './ui/preferencePanel.js'
 import { createRecommendationEnginePanel } from './ui/recommendationEnginePanel.js'
 import { createCuratedAnchorResolutionPanel } from './ui/curatedAnchorResolutionPanel.js'
 import { createDiscoveredRecommendationsPanel } from './ui/discoveredRecommendationsPanel.js'
+import { createRecommendationHomePanel } from './ui/recommendationHomePanel.js'
 
 const titlesById = new Map(
   catalog.titles.map(title => [title.id, title])
@@ -72,6 +73,7 @@ const curatedAnchorResolutionPanel = createCuratedAnchorResolutionPanel({
   onIdentityResolutionChanged: () => Promise.all([viewingAnalysisPanel.refresh(), recommendationEnginePanel.refresh(), identityResolutionPanel.refresh()])
 })
 const discoveredRecommendationsPanel = createDiscoveredRecommendationsPanel({ requestRender: render })
+const recommendationHomePanel = createRecommendationHomePanel({ requestRender: render })
 
 const shows = recommendationData.recommendations.map(recommendation => {
   const title = titlesById.get(recommendation.titleId)
@@ -176,6 +178,7 @@ async function refreshPrivateDataViews() {
     preferencePanel.refresh(),
     recommendationEnginePanel.refresh(),
     tmdbCredentialPanel.refresh()
+    ,recommendationHomePanel.refresh()
   ])
 }
 
@@ -443,10 +446,10 @@ function render() {
         </div>
       </header>
 
-      ${discoveredRecommendationsPanel.render(privateDemoState.status === 'ready')}
+      ${recommendationHomePanel.render(privateDemoState.status === 'ready')}
 
       <details class="workbench-section">
-        <summary>Private data, imports, and backup</summary>
+        <summary>Settings, data, and backup</summary>
         <p class="workbench-note">Use these when adding history or protecting your private local data.</p>
         ${netflixImportPanel.render(privateDemoState.status === 'ready')}
         ${amazonPrimeImportPanel.render(privateDemoState.status === 'ready')}
@@ -463,6 +466,7 @@ function render() {
         ${preferencePanel.render(privateDemoState.status === 'ready')}
         ${recommendationEnginePanel.render(privateDemoState.status === 'ready')}
         ${tmdbCredentialPanel.render(privateDemoState.status === 'ready')}
+        ${discoveredRecommendationsPanel.render(privateDemoState.status === 'ready')}
       </details>
 
       <details class="workbench-section demo-workbench">
@@ -508,6 +512,7 @@ function render() {
   preferencePanel.bind(privateDemoState.status === 'ready')
   recommendationEnginePanel.bind(privateDemoState.status === 'ready')
   discoveredRecommendationsPanel.bind(privateDemoState.status === 'ready')
+  recommendationHomePanel.bind(privateDemoState.status === 'ready')
   tmdbCredentialPanel.bind(privateDemoState.status === 'ready')
 }
 
